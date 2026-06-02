@@ -260,23 +260,6 @@ class SpeedMonitorService : Service() {
         paint.textSize = 25f
         canvas.drawText(unit, size / 2f, size - 10f, paint)
 
-        paint.style = Paint.Style.FILL
-        if (isDownload) {
-            val path = android.graphics.Path()
-            path.moveTo(10f, 10f)
-            path.lineTo(30f, 10f)
-            path.lineTo(20f, 30f)
-            path.close()
-            canvas.drawPath(path, paint)
-        } else {
-            val path = android.graphics.Path()
-            path.moveTo(size - 30f, 30f)
-            path.lineTo(size - 10f, 30f)
-            path.lineTo(size - 20f, 10f)
-            path.close()
-            canvas.drawPath(path, paint)
-        }
-
         return bitmap
     }
 
