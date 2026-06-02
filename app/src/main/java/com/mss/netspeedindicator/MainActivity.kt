@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.mss.netspeedindicator.data.AppSettings
@@ -140,6 +142,10 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                 }
             )
 
+            if (realTimeEnabled) {
+                ThresholdSettings(settings)
+            }
+
             Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsToggle(
@@ -151,6 +157,64 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                     onSettingsChanged()
                 }
             )
+        }
+    }
+}
+
+@Composable
+fun ThresholdSettings(settings: AppSettings) {
+    var valueStr by remember { mutableStateOf(settings.thresholdValue.let { if (it == 0f) "" else it.toString() }) }
+    var unit by remember { mutableStateOf(settings.thresholdUnit) }
+    val units = listOf("B/s", "KB/s", "MB/s")
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 16.dp)) {
+        Text(
+            text = stringResource(R.string.min_speed_threshold),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OutlinedTextField(
+                value = valueStr,
+                onValueChange = {
+                    if (it.isEmpty() || it.toFloatOrNull() != null) {
+                        valueStr = it
+                        settings.thresholdValue = it.toFloatOrNull() ?: 0f
+                    }
+                },
+                label = { Text(stringResource(R.string.threshold_value)) },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(unit)
+                }
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    units.forEach { selectionOption ->
+                        DropdownMenuItem(
+                            text = { Text(selectionOption) },
+                            onClick = {
+                                unit = selectionOption
+                                settings.thresholdUnit = selectionOption
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }

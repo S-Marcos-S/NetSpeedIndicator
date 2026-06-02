@@ -51,7 +51,7 @@ class SpeedMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createNotification("0 KB/s", true, "0 B/s", "0 B/s", "0 B", "0 B")
+        val notification = createNotification("0 KB/s", true, "0 B/s", "0 B/s", "0 B", "0 B", false)
         startForeground(NOTIFICATION_ID, notification)
         handler.post(updateRunnable)
         return START_STICKY
@@ -112,13 +112,22 @@ class SpeedMonitorService : Service() {
         val isDownload = downloadSpeed >= uploadSpeed
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
         
+        // Check threshold
+        val thresholdInBytes = when (settings.thresholdUnit) {
+            "KB/s" -> settings.thresholdValue * 1024
+            "MB/s" -> settings.thresholdValue * 1024 * 1024
+            else -> settings.thresholdValue
+        }
+
+        val showRealTime = settings.isRealTimeEnabled && displaySpeed >= thresholdInBytes
+        
         val speedText = formatSpeed(displaySpeed)
         val downSpeedText = formatSpeed(downloadSpeed)
         val upSpeedText = formatSpeed(uploadSpeed)
         val mobileText = formatBytes(mobileTotal)
         val wifiText = formatBytes(wifiTotal)
 
-        val notification = createNotification(speedText, isDownload, downSpeedText, upSpeedText, mobileText, wifiText)
+        val notification = createNotification(speedText, isDownload, downSpeedText, upSpeedText, mobileText, wifiText, showRealTime)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
@@ -146,12 +155,13 @@ class SpeedMonitorService : Service() {
         downSpeedText: String, 
         upSpeedText: String, 
         mobileText: String, 
-        wifiText: String
+        wifiText: String,
+        showRealTime: Boolean
     ): Notification {
         val bitmap = createSpeedBitmap(iconSpeedText, isDownload)
         
         val contentText = buildString {
-            if (settings.isRealTimeEnabled) {
+            if (showRealTime) {
                 append("↓$downSpeedText ↑$upSpeedText")
             }
             if (settings.isDailyUsageEnabled) {
@@ -167,7 +177,7 @@ class SpeedMonitorService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && settings.isRealTimeEnabled) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && showRealTime) {
             builder.setSmallIcon(IconCompat.createWithBitmap(bitmap))
         } else {
             builder.setSmallIcon(R.drawable.ic_net_speed)
@@ -176,9 +186,11 @@ class SpeedMonitorService : Service() {
         // Expanded view showing details
         val bigTextStyle = NotificationCompat.BigTextStyle()
         val bigText = buildString {
-            append("Download: $downSpeedText  |  Upload: $upSpeedText")
+            if (showRealTime) {
+                append("Download: $downSpeedText  |  Upload: $upSpeedText")
+            }
             if (settings.isDailyUsageEnabled) {
-                append("\n\n")
+                if (isNotEmpty()) append("\n\n")
                 append("Dados Móveis hoje: $mobileText\n")
                 append("Wi-Fi hoje: $wifiText")
             }

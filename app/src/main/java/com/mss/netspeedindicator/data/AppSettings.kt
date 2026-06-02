@@ -34,4 +34,12 @@ class AppSettings(context: Context) {
     var baseWifiTx: Long
         get() = prefs.getLong("base_wifi_tx", 0L)
         set(value) = prefs.edit().putLong("base_wifi_tx", value).apply()
+
+    var thresholdValue: Float
+        get() = prefs.getFloat("threshold_value", 0f)
+        set(value) = prefs.edit().putFloat("threshold_value", value).apply()
+
+    var thresholdUnit: String
+        get() = prefs.getString("threshold_unit", "KB/s") ?: "KB/s"
+        set(value) = prefs.edit().putString("threshold_unit", value).apply()
 }

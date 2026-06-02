@@ -11,4 +11,10 @@
     <string name="mobile_data">Dados Móveis</string>
     <string name="wifi_data">Wi-Fi</string>
     <string name="total_usage">Uso Total Hoje</string>
+    <string name="min_speed_threshold">Valor Mínimo para Exibição</string>
+    <string name="threshold_value">Valor</string>
+    <string name="threshold_unit">Unidade</string>
+    <string name="unit_bps">B/s</string>
+    <string name="unit_kbps">KB/s</string>
+    <string name="unit_mbps">MB/s</string>
 </resources>
