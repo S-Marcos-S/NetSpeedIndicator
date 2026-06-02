@@ -33,10 +33,31 @@ class SpeedMonitorService : Service() {
     private var lastTxBytes: Long = 0
     private var lastTime: Long = 0
 
+    private var isScreenOn = true
+    private var lastNotificationText = ""
+    private var lastIconSpeedText = ""
+    private var lastIsDownload = false
+
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            when (intent?.action) {
+                android.content.Intent.ACTION_SCREEN_ON -> {
+                    isScreenOn = true
+                    handler.removeCallbacks(updateRunnable)
+                    handler.post(updateRunnable)
+                }
+                android.content.Intent.ACTION_SCREEN_OFF -> {
+                    isScreenOn = false
+                }
+            }
+        }
+    }
+
     private val updateRunnable = object : Runnable {
         override fun run() {
             updateStats()
-            handler.postDelayed(this, 1000)
+            val interval = if (isScreenOn) 1000L else 30000L // 1s if on, 30s if off
+            handler.postDelayed(this, interval)
         }
     }
 
@@ -48,11 +69,18 @@ class SpeedMonitorService : Service() {
         lastTxBytes = TrafficStats.getTotalTxBytes()
         lastTime = System.currentTimeMillis()
         checkAndResetDailyStats()
+
+        val filter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_SCREEN_ON)
+            addAction(android.content.Intent.ACTION_SCREEN_OFF)
+        }
+        registerReceiver(screenReceiver, filter)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = createNotification("0 KB/s", true, "0 B/s", "0 B/s", "0 B", "0 B", false)
         startForeground(NOTIFICATION_ID, notification)
+        handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
         return START_STICKY
     }
@@ -60,6 +88,7 @@ class SpeedMonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        unregisterReceiver(screenReceiver)
         handler.removeCallbacks(updateRunnable)
         super.onDestroy()
     }
@@ -127,9 +156,26 @@ class SpeedMonitorService : Service() {
         val mobileText = formatBytes(mobileTotal)
         val wifiText = formatBytes(wifiTotal)
 
-        val notification = createNotification(speedText, isDownload, downSpeedText, upSpeedText, mobileText, wifiText, showRealTime)
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        val contentText = buildString {
+            if (showRealTime) {
+                append("↓$downSpeedText ↑$upSpeedText")
+            }
+            if (settings.isDailyUsageEnabled) {
+                if (isNotEmpty()) append(" | ")
+                append("M:$mobileText W:$wifiText")
+            }
+        }
+
+        // Only notify if something meaningful changed to save battery
+        if (contentText != lastNotificationText || (showRealTime && (speedText != lastIconSpeedText || isDownload != lastIsDownload))) {
+            lastNotificationText = contentText
+            lastIconSpeedText = speedText
+            lastIsDownload = isDownload
+            
+            val notification = createNotification(speedText, isDownload, downSpeedText, upSpeedText, mobileText, wifiText, showRealTime, contentText)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun formatBytes(bytes: Long): String {
@@ -156,20 +202,9 @@ class SpeedMonitorService : Service() {
         upSpeedText: String, 
         mobileText: String, 
         wifiText: String,
-        showRealTime: Boolean
+        showRealTime: Boolean,
+        contentText: String = ""
     ): Notification {
-        val bitmap = createSpeedBitmap(iconSpeedText, isDownload)
-        
-        val contentText = buildString {
-            if (showRealTime) {
-                append("↓$downSpeedText ↑$upSpeedText")
-            }
-            if (settings.isDailyUsageEnabled) {
-                if (isNotEmpty()) append(" | ")
-                append("M:$mobileText W:$wifiText")
-            }
-        }
-
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Indicador de Rede")
             .setContentText(contentText)
@@ -178,6 +213,7 @@ class SpeedMonitorService : Service() {
             .setOnlyAlertOnce(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && showRealTime) {
+            val bitmap = createSpeedBitmap(iconSpeedText, isDownload)
             builder.setSmallIcon(IconCompat.createWithBitmap(bitmap))
         } else {
             builder.setSmallIcon(R.drawable.ic_net_speed)
