@@ -9,12 +9,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.mss.netspeedindicator.data.AppSettings
 import com.mss.netspeedindicator.service.SpeedMonitorService
-import com.mss.netspeedindicator.ui.screens.SettingsScreen
 import com.mss.netspeedindicator.ui.theme.NetSpeedIndicatorTheme
 
 class MainActivity : ComponentActivity() {
@@ -34,6 +30,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = AppSettings(this)
+        updateServiceStatus()
         setContent {
             NetSpeedIndicatorTheme {
                 Surface(
@@ -41,57 +38,24 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     PermissionWrapper {
-                        MainNavigation(settings,
-                            onStartService = { startSpeedService() },
-                            onStopService = { stopSpeedService() }
-                        )
+                        MainScreen(settings) { updateServiceStatus() }
                     }
                 }
             }
         }
     }
 
-    private fun startSpeedService() {
+    private fun updateServiceStatus() {
+        val shouldRun = settings.isRealTimeEnabled || settings.isDailyUsageEnabled
         val intent = Intent(this, SpeedMonitorService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun stopSpeedService() {
-        val intent = Intent(this, SpeedMonitorService::class.java)
-        stopService(intent)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MainNavigation(settings: AppSettings, onStartService: () -> Unit, onStopService: () -> Unit) {
-    var showSettings by remember { mutableStateOf(false) }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
-                actions = {
-                    IconButton(onClick = { showSettings = !showSettings }) {
-                        Icon(
-                            imageVector = if (showSettings) Icons.Default.Settings else Icons.Default.Settings,
-                            contentDescription = stringResource(R.string.settings)
-                        )
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Surface(modifier = Modifier.padding(padding)) {
-            if (showSettings) {
-                SettingsScreen(settings)
+        if (shouldRun) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
             } else {
-                MainScreen(onStartService, onStopService)
+                startService(intent)
             }
+        } else {
+            stopService(intent)
         }
     }
 }
@@ -139,26 +103,74 @@ fun PermissionWrapper(content: @Composable () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(onStartService: () -> Unit, onStopService: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
+    var realTimeEnabled by remember { mutableStateOf(settings.isRealTimeEnabled) }
+    var dailyUsageEnabled by remember { mutableStateOf(settings.isDailyUsageEnabled) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.app_name)) }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = stringResource(R.string.settings),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            SettingsToggle(
+                label = stringResource(R.string.enable_real_time),
+                checked = realTimeEnabled,
+                onCheckedChange = {
+                    realTimeEnabled = it
+                    settings.isRealTimeEnabled = it
+                    onSettingsChanged()
+                }
+            )
+
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingsToggle(
+                label = stringResource(R.string.enable_daily_usage),
+                checked = dailyUsageEnabled,
+                onCheckedChange = {
+                    dailyUsageEnabled = it
+                    settings.isDailyUsageEnabled = it
+                    onSettingsChanged()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "Net Speed Indicator",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 32.dp)
+            text = label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge
         )
-        Button(
-            onClick = onStartService,
-            modifier = Modifier.padding(bottom = 8.dp)
-        ) {
-            Text("Iniciar Serviço")
-        }
-        Button(onClick = onStopService) {
-            Text("Parar Serviço")
-        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }
