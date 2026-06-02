@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "com.mss.netspeedindicator.app-merged_res-45:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.mss.netspeedindicator.app-main-47:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.mss.netspeedindicator.app-merged_res-45:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.mss.netspeedindicator.app-main-47:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.mss.netspeedindicator.app-merged_res-45:/drawable_ic_net_speed.xml.flat",
+        "source": "com.mss.netspeedindicator.app-main-47:/drawable/ic_net_speed.xml"
+    },
+    {
+        "merged": "com.mss.netspeedindicator.app-merged_res-45:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.mss.netspeedindicator.app-main-47:/mipmap-anydpi-v26/ic_launcher.xml"
+    }
+]
