@@ -51,7 +51,7 @@ class SpeedMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createNotification("0 KB/s", true, "0 B", "0 B")
+        val notification = createNotification("0 KB/s", true, "0 B/s", "0 B/s", "0 B", "0 B")
         startForeground(NOTIFICATION_ID, notification)
         handler.post(updateRunnable)
         return START_STICKY
@@ -113,10 +113,12 @@ class SpeedMonitorService : Service() {
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
         
         val speedText = formatSpeed(displaySpeed)
+        val downSpeedText = formatSpeed(downloadSpeed)
+        val upSpeedText = formatSpeed(uploadSpeed)
         val mobileText = formatBytes(mobileTotal)
         val wifiText = formatBytes(wifiTotal)
 
-        val notification = createNotification(speedText, isDownload, mobileText, wifiText)
+        val notification = createNotification(speedText, isDownload, downSpeedText, upSpeedText, mobileText, wifiText)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
@@ -138,17 +140,23 @@ class SpeedMonitorService : Service() {
         }
     }
 
-    private fun createNotification(speedText: String, isDownload: Boolean, mobileText: String, wifiText: String): Notification {
-        val bitmap = createSpeedBitmap(speedText, isDownload)
+    private fun createNotification(
+        iconSpeedText: String, 
+        isDownload: Boolean, 
+        downSpeedText: String, 
+        upSpeedText: String, 
+        mobileText: String, 
+        wifiText: String
+    ): Notification {
+        val bitmap = createSpeedBitmap(iconSpeedText, isDownload)
         
         val contentText = buildString {
             if (settings.isRealTimeEnabled) {
-                append(if (isDownload) "↓ " else "↑ ")
-                append(speedText)
+                append("↓$downSpeedText ↑$upSpeedText")
             }
             if (settings.isDailyUsageEnabled) {
                 if (isNotEmpty()) append(" | ")
-                append("M: $mobileText W: $wifiText")
+                append("M:$mobileText W:$wifiText")
             }
         }
 
@@ -165,13 +173,17 @@ class SpeedMonitorService : Service() {
             builder.setSmallIcon(R.drawable.ic_net_speed)
         }
 
-        if (settings.isDailyUsageEnabled) {
-            val bigStyle = NotificationCompat.BigTextStyle()
-                .bigText("Download/Upload: $speedText\n" +
-                        "Dados Móveis hoje: $mobileText\n" +
-                        "Wi-Fi hoje: $wifiText")
-            builder.setStyle(bigStyle)
+        // Expanded view showing details
+        val bigTextStyle = NotificationCompat.BigTextStyle()
+        val bigText = buildString {
+            append("Download: $downSpeedText  |  Upload: $upSpeedText")
+            if (settings.isDailyUsageEnabled) {
+                append("\n\n")
+                append("Dados Móveis hoje: $mobileText\n")
+                append("Wi-Fi hoje: $wifiText")
+            }
         }
+        builder.setStyle(bigTextStyle.bigText(bigText))
 
         return builder.build()
     }
