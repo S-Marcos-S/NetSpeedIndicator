@@ -43,11 +43,14 @@ class SpeedMonitorService : Service() {
             when (intent?.action) {
                 android.content.Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
+                    // Resume updates immediately
                     handler.removeCallbacks(updateRunnable)
                     handler.post(updateRunnable)
                 }
                 android.content.Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
+                    // Stop all processing while screen is off
+                    handler.removeCallbacks(updateRunnable)
                 }
             }
         }
@@ -55,9 +58,10 @@ class SpeedMonitorService : Service() {
 
     private val updateRunnable = object : Runnable {
         override fun run() {
+            if (!isScreenOn) return // Extra safety check
+            
             updateStats()
-            val interval = if (isScreenOn) 1000L else 30000L // 1s if on, 30s if off
-            handler.postDelayed(this, interval)
+            handler.postDelayed(this, 1000L)
         }
     }
 
