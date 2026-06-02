@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">NetSpeedIndicator</string>
+    <string name="app_name">Net Speed</string>
     <string name="service_running">Indicador de Velocidade Ativo</string>
     <string name="stop_service">Parar Serviço</string>
     <string name="start_service">Iniciar Serviço</string>
