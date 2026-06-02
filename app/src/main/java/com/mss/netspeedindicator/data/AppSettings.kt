@@ -18,26 +18,26 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean("master_enabled", true)
         set(value) = prefs.edit().putBoolean("master_enabled", value).apply()
         
-    // Usage stats persistence (simplified for today)
+    // Usage stats persistence
     var lastResetDate: Long
         get() = prefs.getLong("last_reset_date", 0L)
         set(value) = prefs.edit().putLong("last_reset_date", value).apply()
 
-    var baseMobileRx: Long
-        get() = prefs.getLong("base_mobile_rx", 0L)
-        set(value) = prefs.edit().putLong("base_mobile_rx", value).apply()
+    var dailyMobileRx: Long
+        get() = prefs.getLong("daily_mobile_rx", 0L)
+        set(value) = prefs.edit().putLong("daily_mobile_rx", value).apply()
         
-    var baseMobileTx: Long
-        get() = prefs.getLong("base_mobile_tx", 0L)
-        set(value) = prefs.edit().putLong("base_mobile_tx", value).apply()
+    var dailyMobileTx: Long
+        get() = prefs.getLong("daily_mobile_tx", 0L)
+        set(value) = prefs.edit().putLong("daily_mobile_tx", value).apply()
 
-    var baseWifiRx: Long
-        get() = prefs.getLong("base_wifi_rx", 0L)
-        set(value) = prefs.edit().putLong("base_wifi_rx", value).apply()
+    var dailyWifiRx: Long
+        get() = prefs.getLong("daily_wifi_rx", 0L)
+        set(value) = prefs.edit().putLong("daily_wifi_rx", value).apply()
 
-    var baseWifiTx: Long
-        get() = prefs.getLong("base_wifi_tx", 0L)
-        set(value) = prefs.edit().putLong("base_wifi_tx", value).apply()
+    var dailyWifiTx: Long
+        get() = prefs.getLong("daily_wifi_tx", 0L)
+        set(value) = prefs.edit().putLong("daily_wifi_tx", value).apply()
 
     var thresholdValue: Float
         get() = prefs.getFloat("threshold_value", 0f)
@@ -46,4 +46,8 @@ class AppSettings(context: Context) {
     var thresholdUnit: String
         get() = prefs.getString("threshold_unit", "KB/s") ?: "KB/s"
         set(value) = prefs.edit().putString("threshold_unit", value).apply()
+
+    var updateInterval: Long
+        get() = prefs.getLong("update_interval", 1000L)
+        set(value) = prefs.edit().putLong("update_interval", value).apply()
 }

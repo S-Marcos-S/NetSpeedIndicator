@@ -170,6 +170,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
 
             if (realTimeEnabled && masterEnabled) {
                 ThresholdSettings(settings)
+                IntervalSettings(settings)
             }
 
             Divider(modifier = Modifier.padding(vertical = 8.dp))
@@ -248,6 +249,56 @@ fun ThresholdSettings(settings: AppSettings) {
                             }
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IntervalSettings(settings: AppSettings) {
+    var interval by remember { mutableLongStateOf(settings.updateInterval) }
+    val options = listOf(500L, 1000L, 2000L, 3000L, 5000L)
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.padding(start = 16.dp, top = 8.dp)) {
+        Text(
+            text = stringResource(R.string.update_interval),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Box {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                val label = when {
+                    interval < 1000L -> stringResource(R.string.interval_ms, interval)
+                    interval == 1000L -> stringResource(R.string.interval_s, 1)
+                    else -> stringResource(R.string.interval_s_plural, interval / 1000L)
+                }
+                Text(label)
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            val label = when {
+                                option < 1000L -> stringResource(R.string.interval_ms, option)
+                                option == 1000L -> stringResource(R.string.interval_s, 1)
+                                else -> stringResource(R.string.interval_s_plural, option / 1000L)
+                            }
+                            Text(label)
+                        },
+                        onClick = {
+                            interval = option
+                            settings.updateInterval = option
+                            expanded = false
+                        }
+                    )
                 }
             }
         }

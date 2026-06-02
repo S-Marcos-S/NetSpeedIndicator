@@ -17,4 +17,8 @@
     <string name="unit_bps">B/s</string>
     <string name="unit_kbps">KB/s</string>
     <string name="unit_mbps">MB/s</string>
+    <string name="update_interval">Intervalo de Atualização</string>
+    <string name="interval_ms">%d ms</string>
+    <string name="interval_s">%d segundo</string>
+    <string name="interval_s_plural">%d segundos</string>
 </resources>
