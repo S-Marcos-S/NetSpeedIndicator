@@ -11,7 +11,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.graphics.drawable.Icon
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Handler
@@ -20,12 +19,15 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.mss.netspeedindicator.R
+import com.mss.netspeedindicator.data.AppSettings
+import java.util.Calendar
 
 class SpeedMonitorService : Service() {
 
     private val CHANNEL_ID = "speed_monitor_channel"
     private val NOTIFICATION_ID = 1
     private val handler = Handler(Looper.getMainLooper())
+    private lateinit var settings: AppSettings
     
     private var lastRxBytes: Long = 0
     private var lastTxBytes: Long = 0
@@ -33,21 +35,23 @@ class SpeedMonitorService : Service() {
 
     private val updateRunnable = object : Runnable {
         override fun run() {
-            updateSpeed()
+            updateStats()
             handler.postDelayed(this, 1000)
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        settings = AppSettings(this)
         createNotificationChannel()
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
         lastTime = System.currentTimeMillis()
+        checkAndResetDailyStats()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createNotification("0 KB/s", true)
+        val notification = createNotification("0 KB/s", true, "0 B", "0 B")
         startForeground(NOTIFICATION_ID, notification)
         handler.post(updateRunnable)
         return START_STICKY
@@ -60,7 +64,26 @@ class SpeedMonitorService : Service() {
         super.onDestroy()
     }
 
-    private fun updateSpeed() {
+    private fun checkAndResetDailyStats() {
+        val today = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        if (settings.lastResetDate < today) {
+            settings.lastResetDate = today
+            settings.baseMobileRx = TrafficStats.getMobileRxBytes()
+            settings.baseMobileTx = TrafficStats.getMobileTxBytes()
+            settings.baseWifiRx = TrafficStats.getTotalRxBytes() - settings.baseMobileRx
+            settings.baseWifiTx = TrafficStats.getTotalTxBytes() - settings.baseMobileTx
+        }
+    }
+
+    private fun updateStats() {
+        checkAndResetDailyStats()
+
         val currentRxBytes = TrafficStats.getTotalRxBytes()
         val currentTxBytes = TrafficStats.getTotalTxBytes()
         val currentTime = System.currentTimeMillis()
@@ -69,24 +92,42 @@ class SpeedMonitorService : Service() {
         val deltaTx = currentTxBytes - lastTxBytes
         val deltaTime = (currentTime - lastTime) / 1000.0
 
+        lastRxBytes = currentRxBytes
+        lastTxBytes = currentTxBytes
+        lastTime = currentTime
+
         if (deltaTime <= 0) return
 
         val downloadSpeed = deltaRx / deltaTime
         val uploadSpeed = deltaTx / deltaTime
 
-        lastRxBytes = currentRxBytes
-        lastTxBytes = currentTxBytes
-        lastTime = currentTime
+        val currentMobileRx = TrafficStats.getMobileRxBytes()
+        val currentMobileTx = TrafficStats.getMobileTxBytes()
+        val currentTotalRx = TrafficStats.getTotalRxBytes()
+        val currentTotalTx = TrafficStats.getTotalTxBytes()
 
-        // Choose which speed to show (usually the higher one or cycle)
-        // For now, let's show download if it's significant, otherwise upload
+        val mobileTotal = (currentMobileRx - settings.baseMobileRx) + (currentMobileTx - settings.baseMobileTx)
+        val wifiTotal = (currentTotalRx - currentMobileRx - settings.baseWifiRx) + (currentTotalTx - currentMobileTx - settings.baseWifiTx)
+
         val isDownload = downloadSpeed >= uploadSpeed
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
+        
         val speedText = formatSpeed(displaySpeed)
+        val mobileText = formatBytes(mobileTotal)
+        val wifiText = formatBytes(wifiTotal)
 
-        val notification = createNotification(speedText, isDownload)
+        val notification = createNotification(speedText, isDownload, mobileText, wifiText)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun formatBytes(bytes: Long): String {
+        return when {
+            bytes >= 1024 * 1024 * 1024 -> String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024))
+            bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024))
+            bytes >= 1024 -> String.format("%d KB", bytes / 1024)
+            else -> "$bytes B"
+        }
     }
 
     private fun formatSpeed(bytesPerSecond: Double): String {
@@ -97,28 +138,45 @@ class SpeedMonitorService : Service() {
         }
     }
 
-    private fun createNotification(speedText: String, isDownload: Boolean): Notification {
+    private fun createNotification(speedText: String, isDownload: Boolean, mobileText: String, wifiText: String): Notification {
         val bitmap = createSpeedBitmap(speedText, isDownload)
         
+        val contentText = buildString {
+            if (settings.isRealTimeEnabled) {
+                append(if (isDownload) "↓ " else "↑ ")
+                append(speedText)
+            }
+            if (settings.isDailyUsageEnabled) {
+                if (isNotEmpty()) append(" | ")
+                append("M: $mobileText W: $wifiText")
+            }
+        }
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Velocidade de Internet")
-            .setContentText(if (isDownload) "Download: $speedText" else "Upload: $speedText")
+            .setContentTitle("Indicador de Rede")
+            .setContentText(contentText)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && settings.isRealTimeEnabled) {
             builder.setSmallIcon(IconCompat.createWithBitmap(bitmap))
         } else {
             builder.setSmallIcon(R.drawable.ic_net_speed)
+        }
+
+        if (settings.isDailyUsageEnabled) {
+            val bigStyle = NotificationCompat.BigTextStyle()
+                .bigText("Download/Upload: $speedText\n" +
+                        "Dados Móveis hoje: $mobileText\n" +
+                        "Wi-Fi hoje: $wifiText")
+            builder.setStyle(bigStyle)
         }
 
         return builder.build()
     }
 
     private fun createSpeedBitmap(speedText: String, isDownload: Boolean): Bitmap {
-        // Status bar icons are typically 24x24dp. Let's use 96x96 for better resolution during drawing
-        // and let the system scale it down.
         val size = 96
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -128,8 +186,6 @@ class SpeedMonitorService : Service() {
         paint.color = Color.WHITE
         paint.textAlign = Paint.Align.CENTER
         
-        // Draw the value
-        // We might need to split the value and unit if it's too long
         val valueOnly = speedText.split(" ")[0]
         val unit = speedText.split(" ")[1]
 
@@ -140,10 +196,8 @@ class SpeedMonitorService : Service() {
         paint.textSize = 25f
         canvas.drawText(unit, size / 2f, size - 10f, paint)
 
-        // Draw arrow
         paint.style = Paint.Style.FILL
         if (isDownload) {
-            // Down arrow
             val path = android.graphics.Path()
             path.moveTo(10f, 10f)
             path.lineTo(30f, 10f)
@@ -151,7 +205,6 @@ class SpeedMonitorService : Service() {
             path.close()
             canvas.drawPath(path, paint)
         } else {
-            // Up arrow
             val path = android.graphics.Path()
             path.moveTo(size - 30f, 30f)
             path.lineTo(size - 10f, 30f)

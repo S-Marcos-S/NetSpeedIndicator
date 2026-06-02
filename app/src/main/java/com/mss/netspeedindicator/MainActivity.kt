@@ -13,26 +13,27 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.mss.netspeedindicator.data.AppSettings
 import com.mss.netspeedindicator.service.SpeedMonitorService
+import com.mss.netspeedindicator.ui.screens.SettingsScreen
 import com.mss.netspeedindicator.ui.theme.NetSpeedIndicatorTheme
 
 class MainActivity : ComponentActivity() {
+    private lateinit var settings: AppSettings
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        settings = AppSettings(this)
         setContent {
             NetSpeedIndicatorTheme {
                 Surface(
@@ -40,7 +41,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     PermissionWrapper {
-                        MainScreen(
+                        MainNavigation(settings,
                             onStartService = { startSpeedService() },
                             onStopService = { stopSpeedService() }
                         )
@@ -62,6 +63,36 @@ class MainActivity : ComponentActivity() {
     private fun stopSpeedService() {
         val intent = Intent(this, SpeedMonitorService::class.java)
         stopService(intent)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainNavigation(settings: AppSettings, onStartService: () -> Unit, onStopService: () -> Unit) {
+    var showSettings by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.app_name)) },
+                actions = {
+                    IconButton(onClick = { showSettings = !showSettings }) {
+                        Icon(
+                            imageVector = if (showSettings) Icons.Default.Settings else Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.settings)
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Surface(modifier = Modifier.padding(padding)) {
+            if (showSettings) {
+                SettingsScreen(settings)
+            } else {
+                MainScreen(onStartService, onStopService)
+            }
+        }
     }
 }
 

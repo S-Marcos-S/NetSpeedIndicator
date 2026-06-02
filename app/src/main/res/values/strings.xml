@@ -3,4 +3,12 @@
     <string name="service_running">Indicador de Velocidade Ativo</string>
     <string name="stop_service">Parar Serviço</string>
     <string name="start_service">Iniciar Serviço</string>
+    <string name="settings">Configurações</string>
+    <string name="real_time_speed">Velocidade em Tempo Real</string>
+    <string name="daily_usage">Uso Diário</string>
+    <string name="enable_real_time">Ativar Indicador de Velocidade</string>
+    <string name="enable_daily_usage">Ativar Notificação de Gasto Diário</string>
+    <string name="mobile_data">Dados Móveis</string>
+    <string name="wifi_data">Wi-Fi</string>
+    <string name="total_usage">Uso Total Hoje</string>
 </resources>
