@@ -32,6 +32,17 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_TYPE_EXPLANATION"
                 android:value="Monitoring real-time network speed for display in notification bar." />
         </service>
+
+        <service
+            android:name=".service.NetSpeedTileService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@drawable/ic_net_speed"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

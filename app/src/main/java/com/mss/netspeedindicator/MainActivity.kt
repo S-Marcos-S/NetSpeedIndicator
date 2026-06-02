@@ -9,16 +9,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -48,7 +53,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateServiceStatus() {
-        val shouldRun = settings.isRealTimeEnabled || settings.isDailyUsageEnabled
+        val shouldRun = settings.isMasterEnabled && (settings.isRealTimeEnabled || settings.isDailyUsageEnabled)
         val intent = Intent(this, SpeedMonitorService::class.java)
         if (shouldRun) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -108,8 +113,10 @@ fun PermissionWrapper(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
+    var masterEnabled by remember { mutableStateOf(settings.isMasterEnabled) }
     var realTimeEnabled by remember { mutableStateOf(settings.isRealTimeEnabled) }
     var dailyUsageEnabled by remember { mutableStateOf(settings.isDailyUsageEnabled) }
+    val focusManager = LocalFocusManager.current
 
     Scaffold(
         topBar = {
@@ -122,19 +129,38 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        focusManager.clearFocus()
+                    })
+                }
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
+            SettingsToggle(
+                label = if (masterEnabled) "Aplicativo Ativado" else "Aplicativo Desativado",
+                checked = masterEnabled,
+                onCheckedChange = {
+                    masterEnabled = it
+                    settings.isMasterEnabled = it
+                    onSettingsChanged()
+                },
+                isMaster = true
+            )
+
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
+
             Text(
                 text = stringResource(R.string.settings),
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = if (masterEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
             SettingsToggle(
                 label = stringResource(R.string.enable_real_time),
                 checked = realTimeEnabled,
+                enabled = masterEnabled,
                 onCheckedChange = {
                     realTimeEnabled = it
                     settings.isRealTimeEnabled = it
@@ -142,7 +168,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                 }
             )
 
-            if (realTimeEnabled) {
+            if (realTimeEnabled && masterEnabled) {
                 ThresholdSettings(settings)
             }
 
@@ -151,6 +177,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
             SettingsToggle(
                 label = stringResource(R.string.enable_daily_usage),
                 checked = dailyUsageEnabled,
+                enabled = masterEnabled,
                 onCheckedChange = {
                     dailyUsageEnabled = it
                     settings.isDailyUsageEnabled = it
@@ -167,6 +194,7 @@ fun ThresholdSettings(settings: AppSettings) {
     var unit by remember { mutableStateOf(settings.thresholdUnit) }
     val units = listOf("B/s", "KB/s", "MB/s")
     var expanded by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
     Column(modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 16.dp)) {
         Text(
@@ -188,7 +216,13 @@ fun ThresholdSettings(settings: AppSettings) {
                 },
                 label = { Text(stringResource(R.string.threshold_value)) },
                 modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Decimal,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { focusManager.clearFocus() }
+                ),
                 singleLine = true
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -210,6 +244,7 @@ fun ThresholdSettings(settings: AppSettings) {
                                 unit = selectionOption
                                 settings.thresholdUnit = selectionOption
                                 expanded = false
+                                focusManager.clearFocus()
                             }
                         )
                     }
@@ -220,7 +255,13 @@ fun ThresholdSettings(settings: AppSettings) {
 }
 
 @Composable
-fun SettingsToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun SettingsToggle(
+    label: String, 
+    checked: Boolean, 
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+    isMaster: Boolean = false
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -230,11 +271,13 @@ fun SettingsToggle(label: String, checked: Boolean, onCheckedChange: (Boolean) -
         Text(
             text = label,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge
+            style = if (isMaster) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
         )
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            enabled = enabled
         )
     }
 }

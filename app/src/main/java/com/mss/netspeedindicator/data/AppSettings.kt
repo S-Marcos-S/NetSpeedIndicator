@@ -13,6 +13,10 @@ class AppSettings(context: Context) {
     var isDailyUsageEnabled: Boolean
         get() = prefs.getBoolean("daily_usage_enabled", false)
         set(value) = prefs.edit().putBoolean("daily_usage_enabled", value).apply()
+
+    var isMasterEnabled: Boolean
+        get() = prefs.getBoolean("master_enabled", true)
+        set(value) = prefs.edit().putBoolean("master_enabled", value).apply()
         
     // Usage stats persistence (simplified for today)
     var lastResetDate: Long
