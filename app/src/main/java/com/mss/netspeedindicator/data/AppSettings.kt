@@ -50,4 +50,8 @@ class AppSettings(context: Context) {
     var updateInterval: Long
         get() = prefs.getLong("update_interval", 1000L)
         set(value) = prefs.edit().putLong("update_interval", value).apply()
+
+    var isStatsEnabled: Boolean
+        get() = prefs.getBoolean("stats_enabled", false)
+        set(value) = prefs.edit().putBoolean("stats_enabled", value).apply()
 }

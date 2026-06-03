@@ -19,6 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -27,8 +29,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mss.netspeedindicator.data.AppSettings
+import com.mss.netspeedindicator.repository.NetworkStatsRepository
 import com.mss.netspeedindicator.service.SpeedMonitorService
+import com.mss.netspeedindicator.ui.stats.StatsScreen
+import com.mss.netspeedindicator.ui.stats.StatsViewModel
 import com.mss.netspeedindicator.ui.theme.NetSpeedIndicatorTheme
 
 class MainActivity : ComponentActivity() {
@@ -45,7 +53,24 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     PermissionWrapper {
-                        MainScreen(settings) { updateServiceStatus() }
+                        var currentScreen by remember { mutableStateOf("main") }
+                        
+                        if (currentScreen == "stats") {
+                            val repository = NetworkStatsRepository(LocalContext.current)
+                            val factory = object : ViewModelProvider.Factory {
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    return StatsViewModel(repository) as T
+                                }
+                            }
+                            val statsViewModel: StatsViewModel = viewModel(factory = factory)
+                            StatsScreen(statsViewModel, onBack = { currentScreen = "main" })
+                        } else {
+                            MainScreen(
+                                settings = settings, 
+                                onSettingsChanged = { updateServiceStatus() },
+                                onNavigateToStats = { currentScreen = "stats" }
+                            )
+                        }
                     }
                 }
             }
@@ -112,16 +137,24 @@ fun PermissionWrapper(content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
+fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateToStats: () -> Unit) {
     var masterEnabled by remember { mutableStateOf(settings.isMasterEnabled) }
     var realTimeEnabled by remember { mutableStateOf(settings.isRealTimeEnabled) }
     var dailyUsageEnabled by remember { mutableStateOf(settings.isDailyUsageEnabled) }
+    var statsEnabled by remember { mutableStateOf(settings.isStatsEnabled) }
     val focusManager = LocalFocusManager.current
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) }
+                title = { Text(stringResource(R.string.app_name)) },
+                actions = {
+                    if (statsEnabled && masterEnabled) {
+                        IconButton(onClick = onNavigateToStats) {
+                            Icon(Icons.Default.BarChart, contentDescription = "Estatísticas")
+                        }
+                    }
+                }
             )
         }
     ) { padding ->
@@ -148,7 +181,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                 isMaster = true
             )
 
-            Divider(modifier = Modifier.padding(vertical = 16.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
 
             Text(
                 text = stringResource(R.string.settings),
@@ -173,7 +206,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                 IntervalSettings(settings)
             }
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsToggle(
                 label = stringResource(R.string.enable_daily_usage),
@@ -182,6 +215,19 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit) {
                 onCheckedChange = {
                     dailyUsageEnabled = it
                     settings.isDailyUsageEnabled = it
+                    onSettingsChanged()
+                }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingsToggle(
+                label = "Ativar Histórico e Gráficos",
+                checked = statsEnabled,
+                enabled = masterEnabled,
+                onCheckedChange = {
+                    statsEnabled = it
+                    settings.isStatsEnabled = it
                     onSettingsChanged()
                 }
             )

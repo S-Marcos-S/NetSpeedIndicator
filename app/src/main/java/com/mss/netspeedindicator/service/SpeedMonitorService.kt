@@ -11,6 +11,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.app.usage.NetworkStatsManager
+import android.net.ConnectivityManager
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Handler
@@ -32,16 +34,12 @@ class SpeedMonitorService : Service() {
     
     private var lastRxBytes: Long = 0
     private var lastTxBytes: Long = 0
-    private var lastMobileRx: Long = 0
-    private var lastMobileTx: Long = 0
     private var lastTime: Long = 0
-    private var lastSaveTime: Long = 0
+    private var lastStatsUpdateTime: Long = 0
 
-    // Memory cache for daily stats to reduce disk I/O
-    private var dailyMobileRx: Long = 0
-    private var dailyMobileTx: Long = 0
-    private var dailyWifiRx: Long = 0
-    private var dailyWifiTx: Long = 0
+    // Cached daily stats from NetworkStatsManager
+    private var dailyMobileTotal: Long = 0
+    private var dailyWifiTotal: Long = 0
 
     private var isScreenOn = true
     private var lastNotificationText = ""
@@ -53,14 +51,13 @@ class SpeedMonitorService : Service() {
             when (intent?.action) {
                 android.content.Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
-                    // Resume updates immediately
+                    // Force a daily stats update when screen turns on
+                    lastStatsUpdateTime = 0 
                     handler.removeCallbacks(updateRunnable)
                     handler.post(updateRunnable)
                 }
                 android.content.Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
-                    saveDailyStatsToStorage() // Save buffered data before stopping
-                    // Stop all processing while screen is off
                     handler.removeCallbacks(updateRunnable)
                 }
             }
@@ -69,7 +66,7 @@ class SpeedMonitorService : Service() {
 
     private val updateRunnable = object : Runnable {
         override fun run() {
-            if (!isScreenOn) return // Extra safety check
+            if (!isScreenOn) return
             
             updateStats()
             handler.postDelayed(this, settings.updateInterval)
@@ -83,19 +80,8 @@ class SpeedMonitorService : Service() {
         
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
-        lastMobileRx = TrafficStats.getMobileRxBytes()
-        lastMobileTx = TrafficStats.getMobileTxBytes()
         lastTime = System.currentTimeMillis()
-        lastSaveTime = lastTime
-
-        // Load daily stats into memory
-        dailyMobileRx = settings.dailyMobileRx
-        dailyMobileTx = settings.dailyMobileTx
-        dailyWifiRx = settings.dailyWifiRx
-        dailyWifiTx = settings.dailyWifiTx
         
-        checkAndResetDailyStats()
-
         val filter = android.content.IntentFilter().apply {
             addAction(android.content.Intent.ACTION_SCREEN_ON)
             addAction(android.content.Intent.ACTION_SCREEN_OFF)
@@ -107,11 +93,9 @@ class SpeedMonitorService : Service() {
         val notification = createNotification("0 KB/s", "0 B/s", "0 B/s", "0 B", "0 B", false)
         startForeground(NOTIFICATION_ID, notification)
         
-        // Reset last bytes on start to avoid huge first delta
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
-        lastMobileRx = TrafficStats.getMobileRxBytes()
-        lastMobileTx = TrafficStats.getMobileTxBytes()
+        lastStatsUpdateTime = 0 // Force update on start
         
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
@@ -121,96 +105,61 @@ class SpeedMonitorService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        saveDailyStatsToStorage()
         unregisterReceiver(screenReceiver)
         handler.removeCallbacks(updateRunnable)
         super.onDestroy()
     }
 
-    private fun checkAndResetDailyStats() {
-        val today = Calendar.getInstance().apply {
+    private fun updateDailyTotalsFromSystem() {
+        val networkStatsManager = getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+        val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-        }.timeInMillis
+        }
+        val startTime = calendar.timeInMillis
+        val endTime = System.currentTimeMillis()
 
-        if (settings.lastResetDate < today) {
-            settings.lastResetDate = today
-            dailyMobileRx = 0L
-            dailyMobileTx = 0L
-            dailyWifiRx = 0L
-            dailyWifiTx = 0L
-            saveDailyStatsToStorage()
+        dailyMobileTotal = queryDeviceTotal(networkStatsManager, ConnectivityManager.TYPE_MOBILE, startTime, endTime)
+        dailyWifiTotal = queryDeviceTotal(networkStatsManager, ConnectivityManager.TYPE_WIFI, startTime, endTime)
+    }
+
+    private fun queryDeviceTotal(manager: NetworkStatsManager, type: Int, start: Long, end: Long): Long {
+        return try {
+            val bucket = manager.querySummaryForDevice(type, null, start, end)
+            bucket.rxBytes + bucket.txBytes
+        } catch (e: Exception) {
+            0L
         }
     }
 
-    private fun saveDailyStatsToStorage() {
-        settings.dailyMobileRx = dailyMobileRx
-        settings.dailyMobileTx = dailyMobileTx
-        settings.dailyWifiRx = dailyWifiRx
-        settings.dailyWifiTx = dailyWifiTx
-    }
-
     private fun updateStats() {
-        checkAndResetDailyStats()
+        val currentTime = System.currentTimeMillis()
+        
+        // Update daily totals from system every 30 seconds to save battery
+        if (currentTime - lastStatsUpdateTime >= 30000L) {
+            updateDailyTotalsFromSystem()
+            lastStatsUpdateTime = currentTime
+        }
 
         val currentTotalRx = TrafficStats.getTotalRxBytes()
         val currentTotalTx = TrafficStats.getTotalTxBytes()
-        val currentMobileRx = TrafficStats.getMobileRxBytes()
-        val currentMobileTx = TrafficStats.getMobileTxBytes()
-        val currentTime = System.currentTimeMillis()
 
         val deltaTime = (currentTime - lastTime) / 1000.0
         if (deltaTime <= 0) return
 
-        val isReboot = SystemClock.elapsedRealtime() < 60000 // 1 minute
-
-        fun processUsage(current: Long, last: Long): Pair<Long, Long> {
-            if (current == TrafficStats.UNSUPPORTED.toLong() || current < 0) return 0L to last
-            if (last <= 0L) return 0L to current
-            
-            return when {
-                current >= last -> (current - last) to current
-                isReboot -> current to current
-                else -> 0L to last // Interface drop, keep last and don't count delta
-            }
-        }
-
-        val (dMobileRx, nextMobileRx) = processUsage(currentMobileRx, lastMobileRx)
-        val (dMobileTx, nextMobileTx) = processUsage(currentMobileTx, lastMobileTx)
-        val (dTotalRx, nextTotalRx) = processUsage(currentTotalRx, lastRxBytes)
-        val (dTotalTx, nextTotalTx) = processUsage(currentTotalTx, lastTxBytes)
-
-        // Wifi is total minus mobile, but ensure non-negative
-        val dWifiRx = if (currentMobileRx != TrafficStats.UNSUPPORTED.toLong()) maxOf(0L, dTotalRx - dMobileRx) else dTotalRx
-        val dWifiTx = if (currentMobileTx != TrafficStats.UNSUPPORTED.toLong()) maxOf(0L, dTotalTx - dMobileTx) else dTotalTx
-
-        // Update daily totals in memory (cached)
-        dailyMobileRx += dMobileRx
-        dailyMobileTx += dMobileTx
-        dailyWifiRx += dWifiRx
-        dailyWifiTx += dWifiTx
-
-        // Periodic save to storage (every 30 seconds)
-        if (currentTime - lastSaveTime >= 30000L) {
-            saveDailyStatsToStorage()
-            lastSaveTime = currentTime
-        }
+        val deltaRx = if (lastRxBytes > 0 && currentTotalRx >= lastRxBytes) currentTotalRx - lastRxBytes else 0L
+        val deltaTx = if (lastTxBytes > 0 && currentTotalTx >= lastTxBytes) currentTotalTx - lastTxBytes else 0L
 
         // Speed calculation
-        val downloadSpeed = dTotalRx / deltaTime
-        val uploadSpeed = dTotalTx / deltaTime
+        val downloadSpeed = deltaRx / deltaTime
+        val uploadSpeed = deltaTx / deltaTime
 
-        // Update last values
-        lastRxBytes = nextTotalRx
-        lastTxBytes = nextTotalTx
-        lastMobileRx = nextMobileRx
-        lastMobileTx = nextMobileTx
+        // Update last values for next speed calculation
+        lastRxBytes = currentTotalRx
+        lastTxBytes = currentTotalTx
         lastTime = currentTime
-
-        val mobileTotal = dailyMobileRx + dailyMobileTx
-        val wifiTotal = dailyWifiRx + dailyWifiTx
 
         val isDownload = downloadSpeed >= uploadSpeed
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
@@ -224,11 +173,16 @@ class SpeedMonitorService : Service() {
 
         val showRealTime = settings.isRealTimeEnabled && displaySpeed >= thresholdInBytes
         
-        val speedText = formatSpeed(displaySpeed)
-        val downSpeedText = formatSpeed(downloadSpeed)
-        val upSpeedText = formatSpeed(uploadSpeed)
-        val mobileText = formatBytes(mobileTotal)
-        val wifiText = formatBytes(wifiTotal)
+        // Use 0 if below threshold to keep UI clean as requested
+        val finalDownSpeed = if (showRealTime) downloadSpeed else 0.0
+        val finalUpSpeed = if (showRealTime) uploadSpeed else 0.0
+        val finalIconSpeed = if (showRealTime) displaySpeed else 0.0
+
+        val speedText = formatSpeed(finalIconSpeed)
+        val downSpeedText = formatSpeed(finalDownSpeed)
+        val upSpeedText = formatSpeed(finalUpSpeed)
+        val mobileText = formatBytes(dailyMobileTotal)
+        val wifiText = formatBytes(dailyWifiTotal)
 
         val contentText = buildString {
             if (settings.isRealTimeEnabled) {
