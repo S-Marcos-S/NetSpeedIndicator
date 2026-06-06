@@ -17,11 +17,127 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 import android.content.pm.ApplicationInfo
+import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
+import androidx.core.graphics.drawable.toBitmap
+import com.mss.netspeedindicator.models.AppUsageSegment
 
 class NetworkStatsRepository(private val context: Context) {
 
     private val networkStatsManager = context.getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
     private val packageManager = context.packageManager
+
+    private val appDetailsCache = mutableMapOf<String, AppDetails>()
+
+    private data class AppDetails(
+        val appName: String,
+        val icon: Drawable?,
+        val dominantColor: Int
+    )
+
+    private fun getAppDetails(packageName: String, uid: Int): AppDetails {
+        return appDetailsCache.getOrPut(packageName) {
+            try {
+                val appInfo = packageManager.getApplicationInfo(packageName, 0)
+                val label = packageManager.getApplicationLabel(appInfo).toString()
+                val icon = packageManager.getApplicationIcon(appInfo)
+                val color = extractDominantColor(icon)
+                AppDetails(label, icon, color)
+            } catch (e: Exception) {
+                val label = when (uid) {
+                    0 -> "Sistema (Root)"
+                    1000 -> "Sistema Android"
+                    else -> packageName
+                }
+                AppDetails(label, null, android.graphics.Color.GRAY)
+            }
+        }
+    }
+
+    private fun extractDominantColor(drawable: Drawable?): Int {
+        if (drawable == null) return android.graphics.Color.GRAY
+        return try {
+            val bitmap = drawable.toBitmap(width = 40, height = 40, config = Bitmap.Config.ARGB_8888)
+            var redSum = 0L
+            var greenSum = 0L
+            var blueSum = 0L
+            var count = 0
+            
+            for (x in 0 until bitmap.width) {
+                for (y in 0 until bitmap.height) {
+                    val pixel = bitmap.getPixel(x, y)
+                    val alpha = android.graphics.Color.alpha(pixel)
+                    if (alpha > 150) {
+                        val r = android.graphics.Color.red(pixel)
+                        val g = android.graphics.Color.green(pixel)
+                        val b = android.graphics.Color.blue(pixel)
+                        
+                        val isNearWhite = r > 240 && g > 240 && b > 240
+                        val isNearBlack = r < 15 && g < 15 && b < 15
+                        if (!isNearWhite && !isNearBlack) {
+                            redSum += r
+                            greenSum += g
+                            blueSum += b
+                            count++
+                        }
+                    }
+                }
+            }
+            
+            if (count > 0) {
+                android.graphics.Color.rgb((redSum / count).toInt(), (greenSum / count).toInt(), (blueSum / count).toInt())
+            } else {
+                val centerPixel = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
+                if (android.graphics.Color.alpha(centerPixel) > 0) centerPixel else android.graphics.Color.GRAY
+            }
+        } catch (e: Exception) {
+            android.graphics.Color.GRAY
+        }
+    }
+
+    private fun getAppSegmentsForInterval(startTime: Long, endTime: Long, totalUsage: Long): List<AppUsageSegment> {
+        if (totalUsage <= 0) return emptyList()
+        val usageMap = mutableMapOf<Int, Long>()
+        
+        collectUidUsageForInterval(ConnectivityManager.TYPE_MOBILE, startTime, endTime, usageMap)
+        collectUidUsageForInterval(ConnectivityManager.TYPE_WIFI, startTime, endTime, usageMap)
+        
+        return usageMap.mapNotNull { (uid, bytes) ->
+            if (bytes <= 1 * 1024) return@mapNotNull null // ignore noise below 1KB
+            val packageNames = packageManager.getPackagesForUid(uid) ?: return@mapNotNull null
+            val packageName = packageNames.firstOrNull() ?: return@mapNotNull null
+            
+            val details = getAppDetails(packageName, uid)
+            AppUsageSegment(
+                packageName = packageName,
+                appName = details.appName,
+                icon = details.icon,
+                bytes = bytes,
+                color = details.dominantColor
+            )
+        }.sortedByDescending { it.bytes }
+    }
+
+    private fun collectUidUsageForInterval(
+        networkType: Int, 
+        startTime: Long, 
+        endTime: Long, 
+        map: MutableMap<Int, Long>
+    ) {
+        try {
+            val stats = networkStatsManager.querySummary(networkType, null, startTime, endTime)
+            val bucket = NetworkStats.Bucket()
+            while (stats.hasNextBucket()) {
+                stats.getNextBucket(bucket)
+                val uid = bucket.uid
+                val current = map[uid] ?: 0L
+                map[uid] = current + bucket.rxBytes + bucket.txBytes
+            }
+            stats.close()
+        } catch (e: Exception) {
+            // Handle
+        }
+    }
 
     suspend fun getStatsForPeriod(startTime: Long, endTime: Long): TimePeriodStats = withContext(Dispatchers.IO) {
         val mobileTotal = getTotalUsage(ConnectivityManager.TYPE_MOBILE, startTime, endTime)
@@ -148,7 +264,8 @@ class NetworkStatsRepository(private val context: Context) {
                 
                 val mobile = getTotalUsage(ConnectivityManager.TYPE_MOBILE, start, minOf(end, endTime))
                 val wifi = getTotalUsage(ConnectivityManager.TYPE_WIFI, start, minOf(end, endTime))
-                points.add(DataPoint(start, label, mobile, wifi))
+                val segments = getAppSegmentsForInterval(start, minOf(end, endTime), mobile + wifi)
+                points.add(DataPoint(start, label, mobile, wifi, segments))
             }
         } else {
             // For longer periods, use daily breakdown
@@ -168,7 +285,8 @@ class NetworkStatsRepository(private val context: Context) {
                 
                 val mobile = getTotalUsage(ConnectivityManager.TYPE_MOBILE, maxOf(start, startTime), minOf(end, endTime))
                 val wifi = getTotalUsage(ConnectivityManager.TYPE_WIFI, maxOf(start, startTime), minOf(end, endTime))
-                points.add(DataPoint(start, label, mobile, wifi))
+                val segments = getAppSegmentsForInterval(maxOf(start, startTime), minOf(end, endTime), mobile + wifi)
+                points.add(DataPoint(start, label, mobile, wifi, segments))
             }
         }
         return points

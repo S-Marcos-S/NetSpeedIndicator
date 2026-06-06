@@ -1,5 +1,6 @@
 package com.mss.netspeedindicator.ui.stats
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.Image
@@ -22,10 +23,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.core.graphics.drawable.toBitmap
 import com.mss.netspeedindicator.R
 import com.mss.netspeedindicator.models.AppUsageInfo
 import com.mss.netspeedindicator.models.TimePeriodStats
+import com.mss.netspeedindicator.models.AppUsageSegment
+import com.mss.netspeedindicator.models.DataPoint
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import com.patrykandpatrick.vico.compose.axis.horizontal.rememberBottomAxis
 import com.patrykandpatrick.vico.compose.axis.vertical.rememberStartAxis
 import com.patrykandpatrick.vico.compose.chart.Chart
@@ -48,6 +57,8 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     LaunchedEffect(Unit) {
         viewModel.checkPermissionAndLoadData(context)
     }
+
+    var showAppBreakdown by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -76,7 +87,11 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     }
                 }
                 is StatsUiState.Success -> {
-                    StatsContent(state.stats)
+                    StatsContent(
+                        stats = state.stats,
+                        showAppBreakdown = showAppBreakdown,
+                        onShowAppBreakdownChange = { showAppBreakdown = it }
+                    )
                 }
                 is StatsUiState.Error -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -111,13 +126,39 @@ fun PeriodSelector(selected: StatsPeriod, onSelected: (StatsPeriod) -> Unit) {
 }
 
 @Composable
-fun StatsContent(stats: TimePeriodStats) {
+fun StatsContent(
+    stats: TimePeriodStats,
+    showAppBreakdown: Boolean,
+    onShowAppBreakdownChange: (Boolean) -> Unit
+) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         item {
             UsageSummary(stats)
         }
         item {
-            UsageChart(stats)
+            if (showAppBreakdown) {
+                AppBreakdownChart(stats)
+            } else {
+                UsageChart(stats)
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Ver consumo detalhado por app no gráfico",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = showAppBreakdown,
+                    onCheckedChange = onShowAppBreakdownChange
+                )
+            }
         }
         item {
             Text(
@@ -296,4 +337,275 @@ private fun formatBytes(bytes: Long): String {
         bytes >= 1024 -> String.format("%d KB", bytes / 1024)
         else -> "$bytes B"
     }
+}
+
+@Composable
+fun AppBreakdownChart(stats: TimePeriodStats) {
+    val maxData = stats.dataPoints.maxOfOrNull { it.mobileData + it.wifiData }?.toFloat() ?: 1f
+    var selectedDataPoint by remember { mutableStateOf<DataPoint?>(null) }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(320.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Consumo Detalhado por Aplicativo (MB)", 
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                YAxisLabels(maxData = maxData)
+                
+                VerticalDivider(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(start = 12.dp, end = 12.dp)
+                        .padding(bottom = 24.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+                
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    stats.dataPoints.forEach { dataPoint ->
+                        BarColumn(
+                            dataPoint = dataPoint,
+                            maxData = maxData,
+                            onClick = { selectedDataPoint = dataPoint }
+                        )
+                    }
+                }
+            }
+        }
+    }
+    
+    selectedDataPoint?.let { dataPoint ->
+        ZoomColumnDialog(
+            dataPoint = dataPoint,
+            onDismiss = { selectedDataPoint = null }
+        )
+    }
+}
+
+@Composable
+fun YAxisLabels(maxData: Float) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.End
+    ) {
+        val maxMb = maxData / (1024 * 1024)
+        Text(formatMb(maxMb), style = MaterialTheme.typography.bodySmall)
+        Text(formatMb(maxMb / 2), style = MaterialTheme.typography.bodySmall)
+        Text("0 MB", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private fun formatMb(mb: Float): String {
+    return if (mb >= 1024f) {
+        String.format("%.1f GB", mb / 1024f)
+    } else {
+        String.format("%.0f MB", mb)
+    }
+}
+
+@Composable
+fun BarColumn(dataPoint: DataPoint, maxData: Float, onClick: () -> Unit) {
+    val segmentsSum = dataPoint.appSegments.sumOf { it.bytes }.toFloat()
+    
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(44.dp)
+            .clickable { onClick() },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp))
+            ) {
+                val emptyWeight = (maxData - segmentsSum).coerceAtLeast(0f)
+                if (emptyWeight > 0f) {
+                    Spacer(modifier = Modifier.weight(emptyWeight))
+                }
+                
+                dataPoint.appSegments.forEach { segment ->
+                    val segmentWeight = segment.bytes.toFloat()
+                    if (segmentWeight > 0f) {
+                        AppSegmentBox(segment = segment, modifier = Modifier.weight(segmentWeight))
+                    }
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(4.dp))
+        
+        Text(
+            text = dataPoint.label,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1
+        )
+    }
+}
+
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+fun AppSegmentBox(segment: AppUsageSegment, modifier: Modifier) {
+    val color = Color(segment.color)
+    
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(color)
+            .padding(2.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (maxHeight >= 20.dp && segment.icon != null) {
+            Image(
+                bitmap = segment.icon.toBitmap().asImageBitmap(),
+                contentDescription = segment.appName,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ZoomColumnDialog(dataPoint: DataPoint, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Fechar")
+            }
+        },
+        title = {
+            Text(
+                text = "Detalhes: ${dataPoint.label}",
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(60.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp))
+                    ) {
+                        dataPoint.appSegments.forEach { segment ->
+                            val weight = segment.bytes.toFloat()
+                            if (weight > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(weight)
+                                        .fillMaxWidth()
+                                        .background(Color(segment.color))
+                                        .padding(4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    BoxWithConstraints(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (maxHeight >= 20.dp && segment.icon != null) {
+                                            Image(
+                                                bitmap = segment.icon.toBitmap().asImageBitmap(),
+                                                contentDescription = segment.appName,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                VerticalDivider(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+                
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(dataPoint.appSegments) { segment ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .background(Color(segment.color), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            segment.icon?.let {
+                                Image(
+                                    bitmap = it.toBitmap().asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = segment.appName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = formatBytes(segment.bytes),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
 }
