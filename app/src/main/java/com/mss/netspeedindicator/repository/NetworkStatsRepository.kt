@@ -53,7 +53,13 @@ class NetworkStatsRepository(private val context: Context) {
                 when (uid) {
                     0 -> AppUsageInfo("root", "Sistema (Root)", null, usage.first, usage.second)
                     1000 -> AppUsageInfo("system", "Sistema Android", null, usage.first, usage.second)
-                    else -> null
+                    else -> AppUsageInfo(
+                        packageName = packageName,
+                        appName = packageName,
+                        icon = null,
+                        mobileData = usage.first,
+                        wifiData = usage.second
+                    )
                 }
             }
         }.sortedByDescending { it.totalData }.take(25)
