@@ -3,6 +3,7 @@ package com.mss.netspeedindicator.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -21,6 +22,7 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.mss.netspeedindicator.MainActivity
 import com.mss.netspeedindicator.R
 import com.mss.netspeedindicator.data.AppSettings
 import java.util.Calendar
@@ -232,9 +234,20 @@ class SpeedMonitorService : Service() {
         showRealTime: Boolean,
         contentText: String = ""
     ): Notification {
+        val notifyIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, notifyIntent, flags)
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Indicador de Rede")
             .setContentText(contentText)
+            .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
