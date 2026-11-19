@@ -39,6 +39,9 @@ import com.mss.netspeedindicator.ui.stats.StatsScreen
 import com.mss.netspeedindicator.ui.stats.StatsViewModel
 import com.mss.netspeedindicator.ui.theme.NetSpeedIndicatorTheme
 import com.mss.netspeedindicator.utils.PermissionUtils
+import com.mss.netspeedindicator.utils.RootUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private lateinit var settings: AppSettings
@@ -146,9 +149,17 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateT
     var realTimeEnabled by remember { mutableStateOf(settings.isRealTimeEnabled) }
     var dailyUsageEnabled by remember { mutableStateOf(settings.isDailyUsageEnabled) }
     var appUsageNotificationEnabled by remember { mutableStateOf(settings.isAppUsageNotificationEnabled) }
+    var rootEnabled by remember { mutableStateOf(settings.isRootEnabled) }
+    var isRootAvailable by remember { mutableStateOf(false) }
     var statsEnabled by remember { mutableStateOf(settings.isStatsEnabled) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            isRootAvailable = RootUtils.isRootAvailable()
+        }
+    }
 
     if (showPermissionDialog) {
         AlertDialog(
@@ -256,14 +267,58 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateT
                 checked = appUsageNotificationEnabled,
                 enabled = masterEnabled,
                 onCheckedChange = { isChecked ->
-                    if (isChecked && !PermissionUtils.hasUsageStatsPermission(context)) {
-                        showPermissionDialog = true
+                    if (isChecked) {
+                        if (settings.isRootEnabled && isRootAvailable) {
+                            Thread { RootUtils.autoGrantPermissions(context.packageName) }.start()
+                            appUsageNotificationEnabled = true
+                            settings.isAppUsageNotificationEnabled = true
+                            onSettingsChanged()
+                        } else if (!PermissionUtils.hasUsageStatsPermission(context)) {
+                            showPermissionDialog = true
+                        } else {
+                            appUsageNotificationEnabled = true
+                            settings.isAppUsageNotificationEnabled = true
+                            onSettingsChanged()
+                        }
                     } else {
-                        appUsageNotificationEnabled = isChecked
-                        settings.isAppUsageNotificationEnabled = isChecked
+                        appUsageNotificationEnabled = false
+                        settings.isAppUsageNotificationEnabled = false
                         onSettingsChanged()
                     }
                 }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingsToggle(
+                label = stringResource(R.string.enable_root_mode),
+                checked = rootEnabled,
+                enabled = masterEnabled,
+                onCheckedChange = { isChecked ->
+                    rootEnabled = isChecked
+                    settings.isRootEnabled = isChecked
+                    if (isChecked) {
+                        Thread {
+                            if (RootUtils.isRootAvailable()) {
+                                isRootAvailable = true
+                                RootUtils.autoGrantPermissions(context.packageName)
+                            }
+                        }.start()
+                    }
+                    onSettingsChanged()
+                }
+            )
+
+            val modeLabel = if (isRootAvailable && rootEnabled) {
+                stringResource(R.string.engine_mode_root)
+            } else {
+                stringResource(R.string.engine_mode_standard)
+            }
+            Text(
+                text = modeLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isRootAvailable && rootEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp, bottom = 4.dp)
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

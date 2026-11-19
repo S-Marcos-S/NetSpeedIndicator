@@ -31,6 +31,7 @@ import com.mss.netspeedindicator.R
 import com.mss.netspeedindicator.data.AppSettings
 import com.mss.netspeedindicator.models.ActiveAppConsumption
 import com.mss.netspeedindicator.utils.PermissionUtils
+import com.mss.netspeedindicator.utils.RootUtils
 import java.util.Calendar
 
 class SpeedMonitorService : Service() {
@@ -56,6 +57,10 @@ class SpeedMonitorService : Service() {
     private var activeConsumingApps = listOf<ActiveAppConsumption>()
     private var topDailyApps = listOf<ActiveAppConsumption>()
     private var lastActiveAppsTimestamp: Long = 0L
+
+    // Hybrid root engine state
+    private var isRootActive: Boolean = false
+    private var hasAttemptedRootGrant: Boolean = false
 
     private var isScreenOn = true
     private var lastNotificationText = ""
@@ -99,6 +104,8 @@ class SpeedMonitorService : Service() {
         lastTxBytes = TrafficStats.getTotalTxBytes()
         lastTime = System.currentTimeMillis()
 
+        checkAndInitRoot()
+
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
@@ -116,6 +123,8 @@ class SpeedMonitorService : Service() {
         lastStatsUpdateTime = 0
         lastAppQueryTime = 0
 
+        checkAndInitRoot()
+
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
         return START_STICKY
@@ -127,6 +136,28 @@ class SpeedMonitorService : Service() {
         unregisterReceiver(screenReceiver)
         handler.removeCallbacks(updateRunnable)
         super.onDestroy()
+    }
+
+    private fun checkAndInitRoot() {
+        if (!settings.isRootEnabled) {
+            isRootActive = false
+            return
+        }
+        Thread {
+            try {
+                if (RootUtils.isRootAvailable()) {
+                    isRootActive = true
+                    if (!hasAttemptedRootGrant) {
+                        hasAttemptedRootGrant = true
+                        RootUtils.autoGrantPermissions(packageName)
+                    }
+                } else {
+                    isRootActive = false
+                }
+            } catch (_: Exception) {
+                isRootActive = false
+            }
+        }.start()
     }
 
     private fun updateDailyTotalsFromSystem() {
@@ -153,10 +184,26 @@ class SpeedMonitorService : Service() {
         }
     }
 
-    private fun updateAppConsumptionFromSystem(currentTime: Long) {
-        if (!settings.isAppUsageNotificationEnabled || !PermissionUtils.hasUsageStatsPermission(this)) {
+    private fun updateAppConsumptionFromSystem(currentTime: Long, currentDeviceSpeed: Double) {
+        if (!settings.isAppUsageNotificationEnabled) {
             activeConsumingApps = emptyList()
             return
+        }
+
+        // Auto-grant permission via root if available
+        if (!PermissionUtils.hasUsageStatsPermission(this)) {
+            if (settings.isRootEnabled && !hasAttemptedRootGrant) {
+                checkAndInitRoot()
+            }
+            if (!PermissionUtils.hasUsageStatsPermission(this)) {
+                activeConsumingApps = emptyList()
+                return
+            }
+        }
+
+        // If total device speed is zero or below threshold, phone is physically idle
+        if (currentDeviceSpeed <= 0.0) {
+            activeConsumingApps = emptyList()
         }
 
         val networkStatsManager = getSystemService(Context.NETWORK_STATS_SERVICE) as? NetworkStatsManager ?: return
@@ -176,24 +223,34 @@ class SpeedMonitorService : Service() {
 
         val timeDeltaSec = if (lastAppQueryTime > 0) (currentTime - lastAppQueryTime) / 1000.0 else 0.0
 
-        if (previousUidBytes.isNotEmpty() && timeDeltaSec > 0.5) {
+        if (previousUidBytes.isNotEmpty() && timeDeltaSec > 0.4 && currentDeviceSpeed > 0.0) {
             val activeList = mutableListOf<ActiveAppConsumption>()
             for ((uid, currentTotal) in currentUidBytes) {
                 if (uid < 0) continue
                 val previousTotal = previousUidBytes[uid] ?: 0L
                 if (currentTotal > previousTotal && previousTotal > 0L) {
                     val delta = currentTotal - previousTotal
-                    val speed = delta / timeDeltaSec
-                    val appName = getAppNameForUid(uid)
-                    activeList.add(ActiveAppConsumption(uid, appName, speed, currentTotal))
+                    val rawSpeed = delta / timeDeltaSec
+                    if (rawSpeed > 0.0) {
+                        val appName = getAppNameForUid(uid)
+                        activeList.add(ActiveAppConsumption(uid, appName, rawSpeed, currentTotal))
+                    }
                 }
             }
 
             if (activeList.isNotEmpty()) {
-                activeList.sortByDescending { it.speedBytesPerSec }
-                activeConsumingApps = activeList.take(3)
+                val sumRawSpeed = activeList.sumOf { it.speedBytesPerSec }
+                val normalizedList = if (sumRawSpeed > currentDeviceSpeed * 1.05 && sumRawSpeed > 0.0) {
+                    val factor = currentDeviceSpeed / sumRawSpeed
+                    activeList.map { app ->
+                        app.copy(speedBytesPerSec = app.speedBytesPerSec * factor)
+                    }
+                } else {
+                    activeList
+                }
+                activeConsumingApps = normalizedList.sortedByDescending { it.speedBytesPerSec }.take(3)
                 lastActiveAppsTimestamp = currentTime
-            } else if (currentTime - lastActiveAppsTimestamp > 6000L) {
+            } else if (currentTime - lastActiveAppsTimestamp > 4000L) {
                 activeConsumingApps = emptyList()
             }
         }
@@ -292,10 +349,10 @@ class SpeedMonitorService : Service() {
         val isDownload = downloadSpeed >= uploadSpeed
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
 
-        // Update app consumption stats (every 2.5s when active traffic, every 15s when idle)
-        val appQueryInterval = if (displaySpeed > 0) 2500L else 15000L
+        // Update app consumption stats (every 2s when active traffic, every 15s when idle)
+        val appQueryInterval = if (displaySpeed > 0) 2000L else 15000L
         if (settings.isAppUsageNotificationEnabled && (currentTime - lastAppQueryTime >= appQueryInterval)) {
-            updateAppConsumptionFromSystem(currentTime)
+            updateAppConsumptionFromSystem(currentTime, displaySpeed)
             lastAppQueryTime = currentTime
         }
 

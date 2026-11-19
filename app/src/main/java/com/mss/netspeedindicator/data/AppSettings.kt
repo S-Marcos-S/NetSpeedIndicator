@@ -58,4 +58,8 @@ class AppSettings(context: Context) {
     var isAppUsageNotificationEnabled: Boolean
         get() = prefs.getBoolean("app_usage_notification_enabled", true)
         set(value) = prefs.edit().putBoolean("app_usage_notification_enabled", value).apply()
+
+    var isRootEnabled: Boolean
+        get() = prefs.getBoolean("root_enabled", true)
+        set(value) = prefs.edit().putBoolean("root_enabled", value).apply()
 }

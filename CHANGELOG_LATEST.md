@@ -1,7 +1,7 @@
-### Net Speed Indicator v1.2.5
+### Net Speed Indicator v1.2.6
 
-- Added real-time app network consumption tracking in live notification.
-- Added settings toggle to enable or disable app usage in notification.
-- Added prompt and shortcut to grant usage access permission when needed.
-- Optimized per-app usage queries with caching for minimal battery impact.
-- Fixed aapt2 override issue in build configuration for CI runners.
+- Added hybrid root/non-root engine for live per-app bandwidth monitoring.
+- Added automatic permission granting via root shell when root access is present.
+- Added physical conservation normalization to match live device transfer speeds.
+- Added root mode toggle and dynamic engine indicator in settings screen.
+- Maintained full non-root support via NetworkStatsManager with graceful fallback.
