@@ -9,6 +9,7 @@ import android.os.Build
 import com.mss.netspeedindicator.models.AppUsageInfo
 import com.mss.netspeedindicator.models.DataPoint
 import com.mss.netspeedindicator.models.TimePeriodStats
+import com.mss.netspeedindicator.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -45,8 +46,8 @@ class NetworkStatsRepository(private val context: Context) {
                 AppDetails(label, icon, color)
             } catch (e: Exception) {
                 val label = when (uid) {
-                    0 -> "Sistema (Root)"
-                    1000 -> "Sistema Android"
+                    0 -> context.getString(R.string.app_system_root)
+                    1000 -> context.getString(R.string.app_system_android)
                     else -> packageName
                 }
                 AppDetails(label, null, android.graphics.Color.GRAY)
@@ -167,8 +168,8 @@ class NetworkStatsRepository(private val context: Context) {
             } catch (e: Exception) {
                 // If it's a known system UID, we can label it
                 when (uid) {
-                    0 -> AppUsageInfo("root", "Sistema (Root)", null, usage.first, usage.second)
-                    1000 -> AppUsageInfo("system", "Sistema Android", null, usage.first, usage.second)
+                    0 -> AppUsageInfo("root", context.getString(R.string.app_system_root), null, usage.first, usage.second)
+                    1000 -> AppUsageInfo("system", context.getString(R.string.app_system_android), null, usage.first, usage.second)
                     else -> AppUsageInfo(
                         packageName = packageName,
                         appName = packageName,

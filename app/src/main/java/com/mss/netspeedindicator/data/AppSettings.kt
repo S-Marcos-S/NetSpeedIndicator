@@ -54,4 +54,8 @@ class AppSettings(context: Context) {
     var isStatsEnabled: Boolean
         get() = prefs.getBoolean("stats_enabled", false)
         set(value) = prefs.edit().putBoolean("stats_enabled", value).apply()
+
+    var isAppUsageNotificationEnabled: Boolean
+        get() = prefs.getBoolean("app_usage_notification_enabled", true)
+        set(value) = prefs.edit().putBoolean("app_usage_notification_enabled", value).apply()
 }

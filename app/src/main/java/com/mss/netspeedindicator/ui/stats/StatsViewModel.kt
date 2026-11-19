@@ -1,12 +1,11 @@
 package com.mss.netspeedindicator.ui.stats
 
-import android.app.AppOpsManager
 import android.content.Context
-import android.os.Process
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mss.netspeedindicator.models.TimePeriodStats
 import com.mss.netspeedindicator.repository.NetworkStatsRepository
+import com.mss.netspeedindicator.utils.PermissionUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -58,14 +57,7 @@ class StatsViewModel(private val repository: NetworkStatsRepository) : ViewModel
     }
 
     private fun hasPermission(context: Context): Boolean {
-        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            appOps.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
-        } else {
-            @Suppress("DEPRECATION")
-            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName)
-        }
-        return mode == AppOpsManager.MODE_ALLOWED
+        return PermissionUtils.hasUsageStatsPermission(context)
     }
 
     private fun getRangeForPeriod(period: StatsPeriod): Pair<Long, Long> {

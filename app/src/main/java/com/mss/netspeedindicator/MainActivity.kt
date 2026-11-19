@@ -15,12 +15,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -38,6 +38,7 @@ import com.mss.netspeedindicator.service.SpeedMonitorService
 import com.mss.netspeedindicator.ui.stats.StatsScreen
 import com.mss.netspeedindicator.ui.stats.StatsViewModel
 import com.mss.netspeedindicator.ui.theme.NetSpeedIndicatorTheme
+import com.mss.netspeedindicator.utils.PermissionUtils
 
 class MainActivity : ComponentActivity() {
     private lateinit var settings: AppSettings
@@ -54,10 +55,11 @@ class MainActivity : ComponentActivity() {
                 ) {
                     PermissionWrapper {
                         var currentScreen by remember { mutableStateOf("main") }
-                        
+
                         if (currentScreen == "stats") {
                             val repository = NetworkStatsRepository(LocalContext.current)
                             val factory = object : ViewModelProvider.Factory {
+                                @Suppress("UNCHECKED_CAST")
                                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                                     return StatsViewModel(repository) as T
                                 }
@@ -66,7 +68,7 @@ class MainActivity : ComponentActivity() {
                             StatsScreen(statsViewModel, onBack = { currentScreen = "main" })
                         } else {
                             MainScreen(
-                                settings = settings, 
+                                settings = settings,
                                 onSettingsChanged = { updateServiceStatus() },
                                 onNavigateToStats = { currentScreen = "stats" }
                             )
@@ -78,7 +80,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateServiceStatus() {
-        val shouldRun = settings.isMasterEnabled && (settings.isRealTimeEnabled || settings.isDailyUsageEnabled)
+        val shouldRun = settings.isMasterEnabled && (settings.isRealTimeEnabled || settings.isDailyUsageEnabled || settings.isAppUsageNotificationEnabled)
         val intent = Intent(this, SpeedMonitorService::class.java)
         if (shouldRun) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -123,13 +125,14 @@ fun PermissionWrapper(content: @Composable () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("O aplicativo precisa de permissão para mostrar notificações.")
+            Text(stringResource(R.string.permission_notification_prompt))
+            Spacer(modifier = Modifier.height(12.dp))
             Button(onClick = {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }) {
-                Text("Conceder Permissão")
+                Text(stringResource(R.string.grant_permission))
             }
         }
     }
@@ -138,11 +141,38 @@ fun PermissionWrapper(content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateToStats: () -> Unit) {
+    val context = LocalContext.current
     var masterEnabled by remember { mutableStateOf(settings.isMasterEnabled) }
     var realTimeEnabled by remember { mutableStateOf(settings.isRealTimeEnabled) }
     var dailyUsageEnabled by remember { mutableStateOf(settings.isDailyUsageEnabled) }
+    var appUsageNotificationEnabled by remember { mutableStateOf(settings.isAppUsageNotificationEnabled) }
     var statsEnabled by remember { mutableStateOf(settings.isStatsEnabled) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text(stringResource(R.string.usage_permission_title)) },
+            text = { Text(stringResource(R.string.usage_permission_explanation)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionDialog = false
+                    appUsageNotificationEnabled = true
+                    settings.isAppUsageNotificationEnabled = true
+                    onSettingsChanged()
+                    PermissionUtils.openUsageAccessSettings(context)
+                }) {
+                    Text(stringResource(R.string.grant))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -151,7 +181,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateT
                 actions = {
                     if (statsEnabled && masterEnabled) {
                         IconButton(onClick = onNavigateToStats) {
-                            Icon(Icons.Default.BarChart, contentDescription = "Estatísticas")
+                            Icon(Icons.Default.BarChart, contentDescription = stringResource(R.string.stats))
                         }
                     }
                 }
@@ -171,7 +201,7 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateT
                 .padding(16.dp)
         ) {
             SettingsToggle(
-                label = if (masterEnabled) "Aplicativo Ativado" else "Aplicativo Desativado",
+                label = if (masterEnabled) stringResource(R.string.app_enabled) else stringResource(R.string.app_disabled),
                 checked = masterEnabled,
                 onCheckedChange = {
                     masterEnabled = it
@@ -222,7 +252,24 @@ fun MainScreen(settings: AppSettings, onSettingsChanged: () -> Unit, onNavigateT
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             SettingsToggle(
-                label = "Ativar Histórico e Gráficos",
+                label = stringResource(R.string.enable_app_usage_notification),
+                checked = appUsageNotificationEnabled,
+                enabled = masterEnabled,
+                onCheckedChange = { isChecked ->
+                    if (isChecked && !PermissionUtils.hasUsageStatsPermission(context)) {
+                        showPermissionDialog = true
+                    } else {
+                        appUsageNotificationEnabled = isChecked
+                        settings.isAppUsageNotificationEnabled = isChecked
+                        onSettingsChanged()
+                    }
+                }
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            SettingsToggle(
+                label = stringResource(R.string.enable_stats),
                 checked = statsEnabled,
                 enabled = masterEnabled,
                 onCheckedChange = {
@@ -353,8 +400,8 @@ fun IntervalSettings(settings: AppSettings) {
 
 @Composable
 fun SettingsToggle(
-    label: String, 
-    checked: Boolean, 
+    label: String,
+    checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
     isMaster: Boolean = false

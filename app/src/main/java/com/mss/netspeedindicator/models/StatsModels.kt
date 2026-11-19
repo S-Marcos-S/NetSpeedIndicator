@@ -33,3 +33,11 @@ data class TimePeriodStats(
     val totalWifi: Long,
     val topApps: List<AppUsageInfo>
 )
+
+data class ActiveAppConsumption(
+    val uid: Int,
+    val appName: String,
+    val speedBytesPerSec: Double,
+    val totalBytes: Long
+)
+

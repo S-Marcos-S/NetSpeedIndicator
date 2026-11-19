@@ -43,7 +43,7 @@ class NetSpeedTileService : TileService() {
     }
 
     private fun updateServiceStatus() {
-        val shouldRun = settings.isMasterEnabled && (settings.isRealTimeEnabled || settings.isDailyUsageEnabled)
+        val shouldRun = settings.isMasterEnabled && (settings.isRealTimeEnabled || settings.isDailyUsageEnabled || settings.isAppUsageNotificationEnabled)
         val intent = Intent(this, SpeedMonitorService::class.java)
         if (shouldRun) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

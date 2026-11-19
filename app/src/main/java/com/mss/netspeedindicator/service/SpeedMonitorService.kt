@@ -5,26 +5,32 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.usage.NetworkStats
+import android.app.usage.NetworkStatsManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
-import android.app.usage.NetworkStatsManager
 import android.net.ConnectivityManager
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.SystemClock
+import android.os.Process
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.mss.netspeedindicator.MainActivity
 import com.mss.netspeedindicator.R
 import com.mss.netspeedindicator.data.AppSettings
+import com.mss.netspeedindicator.models.ActiveAppConsumption
+import com.mss.netspeedindicator.utils.PermissionUtils
 import java.util.Calendar
 
 class SpeedMonitorService : Service() {
@@ -33,32 +39,41 @@ class SpeedMonitorService : Service() {
     private val NOTIFICATION_ID = 1
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var settings: AppSettings
-    
+
     private var lastRxBytes: Long = 0
     private var lastTxBytes: Long = 0
     private var lastTime: Long = 0
     private var lastStatsUpdateTime: Long = 0
+    private var lastAppQueryTime: Long = 0
 
     // Cached daily stats from NetworkStatsManager
     private var dailyMobileTotal: Long = 0
     private var dailyWifiTotal: Long = 0
+
+    // Active and daily app usage tracking
+    private val previousUidBytes = mutableMapOf<Int, Long>()
+    private val appNameCache = mutableMapOf<Int, String>()
+    private var activeConsumingApps = listOf<ActiveAppConsumption>()
+    private var topDailyApps = listOf<ActiveAppConsumption>()
+    private var lastActiveAppsTimestamp: Long = 0L
 
     private var isScreenOn = true
     private var lastNotificationText = ""
     private var lastIconSpeedText = ""
     private var lastIsDownload = false
 
-    private val screenReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                android.content.Intent.ACTION_SCREEN_ON -> {
+                Intent.ACTION_SCREEN_ON -> {
                     isScreenOn = true
-                    // Force a daily stats update when screen turns on
-                    lastStatsUpdateTime = 0 
+                    // Force stats update when screen turns on
+                    lastStatsUpdateTime = 0
+                    lastAppQueryTime = 0
                     handler.removeCallbacks(updateRunnable)
                     handler.post(updateRunnable)
                 }
-                android.content.Intent.ACTION_SCREEN_OFF -> {
+                Intent.ACTION_SCREEN_OFF -> {
                     isScreenOn = false
                     handler.removeCallbacks(updateRunnable)
                 }
@@ -69,7 +84,7 @@ class SpeedMonitorService : Service() {
     private val updateRunnable = object : Runnable {
         override fun run() {
             if (!isScreenOn) return
-            
+
             updateStats()
             handler.postDelayed(this, settings.updateInterval)
         }
@@ -79,26 +94,28 @@ class SpeedMonitorService : Service() {
         super.onCreate()
         settings = AppSettings(this)
         createNotificationChannel()
-        
+
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
         lastTime = System.currentTimeMillis()
-        
-        val filter = android.content.IntentFilter().apply {
-            addAction(android.content.Intent.ACTION_SCREEN_ON)
-            addAction(android.content.Intent.ACTION_SCREEN_OFF)
+
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
         }
         registerReceiver(screenReceiver, filter)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createNotification("0 KB/s", "0 B/s", "0 B/s", "0 B", "0 B", false)
+        val initialText = getString(R.string.service_running)
+        val notification = createNotification("0 KB/s", "0 B/s", "0 B/s", "0 B", "0 B", false, initialText)
         startForeground(NOTIFICATION_ID, notification)
-        
+
         lastRxBytes = TrafficStats.getTotalRxBytes()
         lastTxBytes = TrafficStats.getTotalTxBytes()
-        lastStatsUpdateTime = 0 // Force update on start
-        
+        lastStatsUpdateTime = 0
+        lastAppQueryTime = 0
+
         handler.removeCallbacks(updateRunnable)
         handler.post(updateRunnable)
         return START_STICKY
@@ -113,7 +130,7 @@ class SpeedMonitorService : Service() {
     }
 
     private fun updateDailyTotalsFromSystem() {
-        val networkStatsManager = getSystemService(Context.NETWORK_STATS_SERVICE) as NetworkStatsManager
+        val networkStatsManager = getSystemService(Context.NETWORK_STATS_SERVICE) as? NetworkStatsManager ?: return
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -136,9 +153,118 @@ class SpeedMonitorService : Service() {
         }
     }
 
+    private fun updateAppConsumptionFromSystem(currentTime: Long) {
+        if (!settings.isAppUsageNotificationEnabled || !PermissionUtils.hasUsageStatsPermission(this)) {
+            activeConsumingApps = emptyList()
+            return
+        }
+
+        val networkStatsManager = getSystemService(Context.NETWORK_STATS_SERVICE) as? NetworkStatsManager ?: return
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val startTime = calendar.timeInMillis
+        val endTime = currentTime
+
+        val currentUidBytes = mutableMapOf<Int, Long>()
+        collectUidTotals(networkStatsManager, ConnectivityManager.TYPE_MOBILE, startTime, endTime, currentUidBytes)
+        collectUidTotals(networkStatsManager, ConnectivityManager.TYPE_WIFI, startTime, endTime, currentUidBytes)
+
+        val timeDeltaSec = if (lastAppQueryTime > 0) (currentTime - lastAppQueryTime) / 1000.0 else 0.0
+
+        if (previousUidBytes.isNotEmpty() && timeDeltaSec > 0.5) {
+            val activeList = mutableListOf<ActiveAppConsumption>()
+            for ((uid, currentTotal) in currentUidBytes) {
+                if (uid < 0) continue
+                val previousTotal = previousUidBytes[uid] ?: 0L
+                if (currentTotal > previousTotal && previousTotal > 0L) {
+                    val delta = currentTotal - previousTotal
+                    val speed = delta / timeDeltaSec
+                    val appName = getAppNameForUid(uid)
+                    activeList.add(ActiveAppConsumption(uid, appName, speed, currentTotal))
+                }
+            }
+
+            if (activeList.isNotEmpty()) {
+                activeList.sortByDescending { it.speedBytesPerSec }
+                activeConsumingApps = activeList.take(3)
+                lastActiveAppsTimestamp = currentTime
+            } else if (currentTime - lastActiveAppsTimestamp > 6000L) {
+                activeConsumingApps = emptyList()
+            }
+        }
+
+        val topDaily = currentUidBytes.entries
+            .filter { it.key >= 0 && it.value > 1024L }
+            .sortedByDescending { it.value }
+            .take(3)
+            .map { (uid, bytes) ->
+                ActiveAppConsumption(uid, getAppNameForUid(uid), 0.0, bytes)
+            }
+        topDailyApps = topDaily
+
+        previousUidBytes.clear()
+        previousUidBytes.putAll(currentUidBytes)
+    }
+
+    private fun collectUidTotals(
+        manager: NetworkStatsManager,
+        networkType: Int,
+        startTime: Long,
+        endTime: Long,
+        map: MutableMap<Int, Long>
+    ) {
+        try {
+            val stats = manager.querySummary(networkType, null, startTime, endTime)
+            val bucket = NetworkStats.Bucket()
+            while (stats.hasNextBucket()) {
+                stats.getNextBucket(bucket)
+                val uid = bucket.uid
+                val current = map[uid] ?: 0L
+                map[uid] = current + bucket.rxBytes + bucket.txBytes
+            }
+            stats.close()
+        } catch (e: Exception) {
+            // Handled safely
+        }
+    }
+
+    private fun getAppNameForUid(uid: Int): String {
+        return appNameCache.getOrPut(uid) {
+            when (uid) {
+                0 -> getString(R.string.app_system_root)
+                1000 -> getString(R.string.app_system_android)
+                Process.myUid() -> getString(R.string.app_name)
+                else -> {
+                    val packages = packageManager.getPackagesForUid(uid)
+                    val pkgName = packages?.firstOrNull()
+                    if (pkgName != null) {
+                        try {
+                            val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                packageManager.getApplicationInfo(pkgName, PackageManager.ApplicationInfoFlags.of(0))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                packageManager.getApplicationInfo(pkgName, 0)
+                            }
+                            packageManager.getApplicationLabel(appInfo).toString()
+                        } catch (e: Exception) {
+                            pkgName
+                        }
+                    } else {
+                        "UID $uid"
+                    }
+                }
+            }
+        }
+    }
+
     private fun updateStats() {
         val currentTime = System.currentTimeMillis()
-        
+
         // Update daily totals from system every 30 seconds to save battery
         if (currentTime - lastStatsUpdateTime >= 30000L) {
             updateDailyTotalsFromSystem()
@@ -165,7 +291,14 @@ class SpeedMonitorService : Service() {
 
         val isDownload = downloadSpeed >= uploadSpeed
         val displaySpeed = if (isDownload) downloadSpeed else uploadSpeed
-        
+
+        // Update app consumption stats (every 2.5s when active traffic, every 15s when idle)
+        val appQueryInterval = if (displaySpeed > 0) 2500L else 15000L
+        if (settings.isAppUsageNotificationEnabled && (currentTime - lastAppQueryTime >= appQueryInterval)) {
+            updateAppConsumptionFromSystem(currentTime)
+            lastAppQueryTime = currentTime
+        }
+
         // Check threshold
         val thresholdInBytes = when (settings.thresholdUnit) {
             "KB/s" -> settings.thresholdValue * 1024
@@ -174,8 +307,7 @@ class SpeedMonitorService : Service() {
         }
 
         val showRealTime = settings.isRealTimeEnabled && displaySpeed >= thresholdInBytes
-        
-        // Use 0 if below threshold to keep UI clean as requested
+
         val finalDownSpeed = if (showRealTime) downloadSpeed else 0.0
         val finalUpSpeed = if (showRealTime) uploadSpeed else 0.0
         val finalIconSpeed = if (showRealTime) displaySpeed else 0.0
@@ -189,6 +321,9 @@ class SpeedMonitorService : Service() {
         val contentText = buildString {
             if (settings.isRealTimeEnabled) {
                 append("↓$downSpeedText ↑$upSpeedText")
+                if (settings.isAppUsageNotificationEnabled && activeConsumingApps.isNotEmpty()) {
+                    append(" [${activeConsumingApps.first().appName}]")
+                }
             }
             if (settings.isDailyUsageEnabled) {
                 if (isNotEmpty()) append(" | ")
@@ -201,7 +336,7 @@ class SpeedMonitorService : Service() {
             lastNotificationText = contentText
             lastIconSpeedText = speedText
             lastIsDownload = isDownload
-            
+
             val notification = createNotification(speedText, downSpeedText, upSpeedText, mobileText, wifiText, showRealTime, contentText)
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.notify(NOTIFICATION_ID, notification)
@@ -226,10 +361,10 @@ class SpeedMonitorService : Service() {
     }
 
     private fun createNotification(
-        iconSpeedText: String, 
-        downSpeedText: String, 
-        upSpeedText: String, 
-        mobileText: String, 
+        iconSpeedText: String,
+        downSpeedText: String,
+        upSpeedText: String,
+        mobileText: String,
         wifiText: String,
         showRealTime: Boolean,
         contentText: String = ""
@@ -245,12 +380,17 @@ class SpeedMonitorService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, notifyIntent, flags)
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Indicador de Rede")
+            .setContentTitle(getString(R.string.notification_title))
             .setContentText(contentText)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+
+        if (settings.isAppUsageNotificationEnabled && activeConsumingApps.isNotEmpty()) {
+            val topApp = activeConsumingApps.first()
+            builder.setSubText("${topApp.appName} (${formatSpeed(topApp.speedBytesPerSec)})")
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && showRealTime) {
             val bitmap = createSpeedBitmap(iconSpeedText)
@@ -259,16 +399,40 @@ class SpeedMonitorService : Service() {
             builder.setSmallIcon(R.drawable.ic_net_speed)
         }
 
-        // Expanded view showing details
         val bigTextStyle = NotificationCompat.BigTextStyle()
         val bigText = buildString {
             if (settings.isRealTimeEnabled) {
-                append("Download: $downSpeedText  |  Upload: $upSpeedText")
+                append(getString(R.string.download_prefix, downSpeedText))
+                append("  |  ")
+                append(getString(R.string.upload_prefix, upSpeedText))
             }
+
+            if (settings.isAppUsageNotificationEnabled) {
+                if (PermissionUtils.hasUsageStatsPermission(this@SpeedMonitorService)) {
+                    if (activeConsumingApps.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append(getString(R.string.active_apps_header))
+                        for (app in activeConsumingApps) {
+                            append("\n• ${app.appName}: ${formatSpeed(app.speedBytesPerSec)}")
+                        }
+                    } else if (topDailyApps.isNotEmpty()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append(getString(R.string.top_daily_apps_header))
+                        for (app in topDailyApps) {
+                            append("\n• ${app.appName}: ${formatBytes(app.totalBytes)}")
+                        }
+                    }
+                } else {
+                    if (isNotEmpty()) append("\n\n")
+                    append(getString(R.string.apps_permission_needed))
+                }
+            }
+
             if (settings.isDailyUsageEnabled) {
                 if (isNotEmpty()) append("\n\n")
-                append("Dados Móveis hoje: $mobileText\n")
-                append("Wi-Fi hoje: $wifiText")
+                append(getString(R.string.daily_mobile_prefix, mobileText))
+                append("\n")
+                append(getString(R.string.daily_wifi_prefix, wifiText))
             }
         }
         builder.setStyle(bigTextStyle.bigText(bigText))
@@ -285,9 +449,10 @@ class SpeedMonitorService : Service() {
         paint.isAntiAlias = true
         paint.color = Color.WHITE
         paint.textAlign = Paint.Align.CENTER
-        
-        val valueOnly = speedText.split(" ")[0]
-        val unit = speedText.split(" ")[1]
+
+        val parts = speedText.split(" ")
+        val valueOnly = parts.getOrNull(0) ?: "0"
+        val unit = parts.getOrNull(1) ?: "B/s"
 
         paint.textSize = 50f
         paint.typeface = Typeface.DEFAULT_BOLD
@@ -301,8 +466,8 @@ class SpeedMonitorService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Speed Monitor"
-            val descriptionText = "Shows real-time internet speed"
+            val name = getString(R.string.notification_title)
+            val descriptionText = getString(R.string.service_running)
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText

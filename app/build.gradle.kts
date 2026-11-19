@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.io.File
 
 plugins {
     id("com.android.application")
@@ -14,8 +15,8 @@ android {
         applicationId = "com.mss.netspeedindicator"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.2.3"
+        versionCode = 7
+        versionName = "1.2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -26,13 +27,17 @@ android {
     signingConfigs {
         create("release") {
             val keystorePropertiesFile = rootProject.file("keystore.properties")
-            val keystoreProperties = Properties()
             if (keystorePropertiesFile.exists()) {
+                val keystoreProperties = Properties()
                 keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
+                val rawStoreFile = keystoreProperties["storeFile"]?.toString() ?: ""
+                val sf = if (File(rawStoreFile).isAbsolute) file(rawStoreFile) else rootProject.file(rawStoreFile)
+                if (sf.exists()) {
+                    storeFile = sf
+                    storePassword = keystoreProperties["storePassword"]?.toString() ?: ""
+                    keyAlias = keystoreProperties["keyAlias"]?.toString() ?: ""
+                    keyPassword = keystoreProperties["keyPassword"]?.toString() ?: ""
+                }
             }
         }
     }
@@ -40,7 +45,10 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            signingConfig = signingConfigs.getByName("release")
+            val releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning?.storeFile?.exists() == true) {
+                signingConfig = releaseSigning
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -63,10 +63,10 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Estatísticas de Uso") },
+                title = { Text(stringResource(R.string.stats_screen_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 }
             )
@@ -95,7 +95,7 @@ fun StatsScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 }
                 is StatsUiState.Error -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Erro: ${state.message}", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.error_prefix, state.message), color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
