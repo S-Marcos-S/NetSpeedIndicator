@@ -15,8 +15,8 @@ android {
         applicationId = "com.mss.netspeedindicator"
         minSdk = 24
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.2.6"
+        versionCode = 10
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
