@@ -36,6 +36,10 @@ import java.util.Calendar
 
 class SpeedMonitorService : Service() {
 
+    companion object {
+        const val ACTION_TOGGLE_APP_USAGE = "com.mss.netspeedindicator.action.TOGGLE_APP_USAGE"
+    }
+
     private val CHANNEL_ID = "speed_monitor_channel"
     private val NOTIFICATION_ID = 1
     private val handler = Handler(Looper.getMainLooper())
@@ -114,6 +118,21 @@ class SpeedMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TOGGLE_APP_USAGE) {
+            val newState = !settings.isAppUsageNotificationEnabled
+            settings.isAppUsageNotificationEnabled = newState
+
+            if (newState) {
+                checkAndInitRoot()
+                lastAppQueryTime = 0
+            } else {
+                activeConsumingApps = emptyList()
+            }
+
+            updateStats(forceNotify = true)
+            return START_STICKY
+        }
+
         val initialText = getString(R.string.service_running)
         val notification = createNotification("0 KB/s", "0 B/s", "0 B/s", "0 B", "0 B", false, initialText)
         startForeground(NOTIFICATION_ID, notification)
@@ -319,7 +338,7 @@ class SpeedMonitorService : Service() {
         }
     }
 
-    private fun updateStats() {
+    private fun updateStats(forceNotify: Boolean = false) {
         val currentTime = System.currentTimeMillis()
 
         // Update daily totals from system every 30 seconds to save battery
@@ -388,8 +407,8 @@ class SpeedMonitorService : Service() {
             }
         }
 
-        // Only notify if something meaningful changed to save battery
-        if (contentText != lastNotificationText || (showRealTime && (speedText != lastIconSpeedText || isDownload != lastIsDownload))) {
+        // Only notify if something meaningful changed to save battery, or if forced
+        if (forceNotify || contentText != lastNotificationText || (showRealTime && (speedText != lastIconSpeedText || isDownload != lastIsDownload))) {
             lastNotificationText = contentText
             lastIconSpeedText = speedText
             lastIsDownload = isDownload
@@ -493,6 +512,23 @@ class SpeedMonitorService : Service() {
             }
         }
         builder.setStyle(bigTextStyle.bigText(bigText))
+
+        // Action button to toggle app usage display directly from notification
+        val toggleIntent = Intent(this, SpeedMonitorService::class.java).apply {
+            action = ACTION_TOGGLE_APP_USAGE
+        }
+        val togglePendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.getService(this, 101, toggleIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        } else {
+            PendingIntent.getService(this, 101, toggleIntent, PendingIntent.FLAG_UPDATE_CURRENT)
+        }
+
+        val actionTitle = if (settings.isAppUsageNotificationEnabled) {
+            getString(R.string.action_hide_apps)
+        } else {
+            getString(R.string.action_show_apps)
+        }
+        builder.addAction(R.drawable.ic_net_speed, actionTitle, togglePendingIntent)
 
         return builder.build()
     }

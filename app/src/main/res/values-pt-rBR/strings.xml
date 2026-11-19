@@ -10,6 +10,8 @@
     <string name="enable_daily_usage">Ativar Notificação de Gasto Diário</string>
     <string name="enable_stats">Ativar Histórico e Gráficos</string>
     <string name="enable_app_usage_notification">Mostrar Consumo de Apps na Notificação</string>
+    <string name="action_hide_apps">Ocultar Apps</string>
+    <string name="action_show_apps">Ver Apps</string>
     <string name="enable_root_mode">Usar Acesso Root Quando Disponível</string>
     <string name="engine_mode_root">Engine: Root (Instantâneo)</string>
     <string name="engine_mode_standard">Engine: Padrão (Sem Root)</string>

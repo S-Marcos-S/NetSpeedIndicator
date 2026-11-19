@@ -10,6 +10,8 @@
     <string name="enable_daily_usage">Enable Daily Usage Notification</string>
     <string name="enable_stats">Enable History and Charts</string>
     <string name="enable_app_usage_notification">Show Apps Consuming Data in Notification</string>
+    <string name="action_hide_apps">Hide Apps</string>
+    <string name="action_show_apps">Show Apps</string>
     <string name="enable_root_mode">Use Root When Available</string>
     <string name="engine_mode_root">Engine: Root (Instant)</string>
     <string name="engine_mode_standard">Engine: Standard (Non-Root)</string>
